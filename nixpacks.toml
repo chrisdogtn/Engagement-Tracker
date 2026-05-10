@@ -1,0 +1,9 @@
+[phases.install]
+cmds = ["npm ci --omit=dev"]
+
+[start]
+cmd = "npm start"
+
+[variables]
+NODE_ENV = "production"
+PORT = "3000"
