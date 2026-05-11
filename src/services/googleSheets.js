@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { google } = require("googleapis");
 const { normalizeRules } = require("../logic/contentParser");
 const { parseDateInput, startOfDay, endOfDay } = require("../utils/dateRange");
@@ -61,6 +62,7 @@ class GoogleSheetsClient {
     contentPerformanceSheetName,
     adBoostSheetName,
     applicationCredentials,
+    serviceAccountJson,
     clientEmail,
     privateKey
   }) {
@@ -71,7 +73,7 @@ class GoogleSheetsClient {
     this.dashboardYear = dashboardYear || new Date().getFullYear();
     this.contentPerformanceSheetName = contentPerformanceSheetName || "Content Performance Breakdown";
     this.adBoostSheetName = adBoostSheetName || "Ad + Boost Tracking";
-    this.auth = buildAuth({ applicationCredentials, clientEmail, privateKey });
+    this.auth = buildAuth({ applicationCredentials, serviceAccountJson, clientEmail, privateKey });
     this.sheets = google.sheets({ version: "v4", auth: this.auth });
   }
 
@@ -473,8 +475,25 @@ class GoogleSheetsClient {
   }
 }
 
-function buildAuth({ applicationCredentials, clientEmail, privateKey }) {
+function buildAuth({ applicationCredentials, serviceAccountJson, clientEmail, privateKey }) {
   const scopes = ["https://www.googleapis.com/auth/spreadsheets"];
+
+  if (serviceAccountJson) {
+    validatePrivateKey(serviceAccountJson.private_key, "GOOGLE_SERVICE_ACCOUNT_JSON.private_key");
+    return new google.auth.GoogleAuth({
+      credentials: serviceAccountJson,
+      scopes
+    });
+  }
+
+  if (clientEmail && privateKey) {
+    validatePrivateKey(privateKey, "GOOGLE_PRIVATE_KEY");
+    return new google.auth.JWT({
+      email: clientEmail,
+      key: privateKey,
+      scopes
+    });
+  }
 
   if (applicationCredentials) {
     return new google.auth.GoogleAuth({
@@ -483,11 +502,25 @@ function buildAuth({ applicationCredentials, clientEmail, privateKey }) {
     });
   }
 
-  return new google.auth.JWT({
-    email: clientEmail,
-    key: privateKey,
-    scopes
-  });
+  throw new Error(
+    "Missing Google credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY, or GOOGLE_APPLICATION_CREDENTIALS."
+  );
+}
+
+function validatePrivateKey(privateKey, sourceName) {
+  if (!privateKey || !String(privateKey).includes("BEGIN PRIVATE KEY")) {
+    throw new Error(
+      `${sourceName} is not a valid Google service-account private key. It must include -----BEGIN PRIVATE KEY----- and escaped \\n line breaks.`
+    );
+  }
+
+  try {
+    crypto.createPrivateKey(privateKey);
+  } catch (error) {
+    throw new Error(
+      `${sourceName} could not be decoded by Node/OpenSSL. In Coolify, paste the full service-account JSON into GOOGLE_SERVICE_ACCOUNT_JSON, or use GOOGLE_SERVICE_ACCOUNT_JSON_BASE64. Original decoder error: ${error.message}`
+    );
+  }
 }
 
 function postToRow(post, syncedAt, headers = HEADER_ROW) {

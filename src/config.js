@@ -49,6 +49,9 @@ function getConfig({ requireSecrets = true } = {}) {
       contentPerformanceSheetName: process.env.CONTENT_PERFORMANCE_SHEET_NAME || "Content Performance Breakdown",
       adBoostSheetName: process.env.AD_BOOST_SHEET_NAME || "Ad + Boost Tracking",
       applicationCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS || "",
+      serviceAccountJson: parseServiceAccountJson(
+        process.env.GOOGLE_SERVICE_ACCOUNT_JSON || decodeBase64Env("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
+      ),
       clientEmail: process.env.GOOGLE_CLIENT_EMAIL || "",
       privateKey: normalizePrivateKey(process.env.GOOGLE_PRIVATE_KEY || "")
     },
@@ -64,9 +67,13 @@ function getConfig({ requireSecrets = true } = {}) {
     requireConfig(config.meta.pageAccessToken, "META_PAGE_ACCESS_TOKEN");
     requireConfig(config.google.spreadsheetId, "GOOGLE_SPREADSHEET_ID");
 
-    if (!config.google.applicationCredentials && (!config.google.clientEmail || !config.google.privateKey)) {
+    if (
+      !config.google.serviceAccountJson &&
+      !config.google.applicationCredentials &&
+      (!config.google.clientEmail || !config.google.privateKey)
+    ) {
       throw new Error(
-        "Missing Google credentials. Set GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY."
+        "Missing Google credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_APPLICATION_CREDENTIALS, or GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY."
       );
     }
   }
@@ -79,7 +86,50 @@ function getConfig({ requireSecrets = true } = {}) {
 }
 
 function normalizePrivateKey(key) {
-  return key.replace(/\\n/g, "\n");
+  let normalized = String(key || "").trim();
+
+  if (
+    (normalized.startsWith('"') && normalized.endsWith('"')) ||
+    (normalized.startsWith("'") && normalized.endsWith("'"))
+  ) {
+    normalized = normalized.slice(1, -1);
+  }
+
+  return normalized
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/-----BEGIN ([A-Z ]+)-----\s*/g, "-----BEGIN $1-----\n")
+    .replace(/\s*-----END ([A-Z ]+)-----/g, "\n-----END $1-----");
+}
+
+function parseServiceAccountJson(rawJson) {
+  if (!rawJson) return null;
+  const parsed = JSON.parse(stripWrappingQuotes(rawJson));
+
+  if (parsed.private_key) {
+    parsed.private_key = normalizePrivateKey(parsed.private_key);
+  }
+
+  return parsed;
+}
+
+function stripWrappingQuotes(value) {
+  const trimmed = String(value || "").trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"') && !trimmed.startsWith('{"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function decodeBase64Env(name) {
+  const raw = process.env[name];
+  if (!raw) return "";
+  return Buffer.from(raw, "base64").toString("utf8");
 }
 
 function csvFromEnv(name) {

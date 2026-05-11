@@ -108,7 +108,27 @@ CONTENT_PERFORMANCE_SHEET_NAME=Content Performance Breakdown
 AD_BOOST_SHEET_NAME=Ad + Boost Tracking
 ```
 
-For Google credentials, prefer environment-only credentials in Coolify:
+For Google credentials, prefer environment-only credentials in Coolify.
+
+Option A, easiest: paste the entire service account JSON as one variable. This is usually the least fussy path in Coolify:
+
+```bash
+GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"..."}
+```
+
+Option B, most reliable when the UI mangles quotes/newlines: base64 encode the entire JSON file and paste that:
+
+```bash
+GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=base64-encoded-service-account-json
+```
+
+On Windows PowerShell:
+
+```powershell
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content .\service-account.json -Raw)))
+```
+
+Option C: split the JSON into email and private key:
 
 ```bash
 GOOGLE_CLIENT_EMAIL=your-service-account@project-id.iam.gserviceaccount.com
@@ -117,13 +137,15 @@ GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\
 
 Keep the literal `\n` line breaks in the private key. The app converts them at runtime.
 
-Alternative: mount `service-account.json` into the container and set:
+Important: if you use Option A, B, or C, do not set `GOOGLE_APPLICATION_CREDENTIALS` in Coolify. If it is already set to `/app/service-account.json`, remove that variable or leave it blank.
+
+Alternative: mount `service-account.json` into the runtime and set:
 
 ```bash
 GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
 ```
 
-The env-only option is simpler for Coolify testing.
+The env-only options are simpler for Coolify testing.
 
 ## 4. Deploy And Test
 
