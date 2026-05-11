@@ -105,6 +105,15 @@ curl -X POST http://localhost:3000/sync-socials \
 
 If no range is supplied, the app uses `LOOKBACK_DAYS`.
 
+Refresh dashboard/rollup tabs without pulling Meta:
+
+```bash
+curl -X POST http://localhost:3000/refresh-dashboard \
+  -H "Content-Type: application/json" \
+  -H "x-sync-secret: replace-with-the-same-secret-from-env" \
+  -d "{\"source\":\"manual-test\"}"
+```
+
 ## Meta Graph API Token Setup
 
 You need a Page access token for the Facebook Page you own or manage.
@@ -226,6 +235,15 @@ For a button-style experience, insert a Drawing or Image in the sheet, label it 
 ```text
 syncSocialsNow
 ```
+
+For Q1/Q2/Q3/Q4 dashboard auto-refresh:
+
+1. Paste the latest `docs/apps-script-sync-now.gs`.
+2. Reload the sheet.
+3. Choose `Engagement Tracker > Install Date Auto-Refresh`.
+4. Approve permissions.
+
+After that, entering a date in column `A` on `Q1 Socials`, `Q2 Socials`, `Q3 Socials`, or `Q4 Socials` calls `/refresh-dashboard` and fills the matching weekly sections from `Post-Level Tracking`.
 
 ## Desktop Executable Packaging
 

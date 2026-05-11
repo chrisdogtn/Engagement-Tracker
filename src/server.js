@@ -1,7 +1,7 @@
 const express = require("express");
 const cron = require("node-cron");
 const { getConfig } = require("./config");
-const { runSync } = require("./syncService");
+const { refreshDashboard, runSync } = require("./syncService");
 
 function createApp(config = getConfig({ requireSecrets: false })) {
   const app = express();
@@ -45,6 +45,33 @@ function createApp(config = getConfig({ requireSecrets: false })) {
     }
   });
 
+  app.post("/refresh-dashboard", async (req, res) => {
+    if (!isAuthorized(req, config)) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
+    if (syncInProgress) {
+      return res.status(409).json({
+        ok: false,
+        error: "A sync is already running. Try again in a few minutes."
+      });
+    }
+
+    syncInProgress = true;
+    try {
+      const result = await refreshDashboard(getConfig());
+      return res.json(result);
+    } catch (error) {
+      console.error("[refresh-dashboard] Refresh failed:", error);
+      return res.status(500).json({
+        ok: false,
+        error: error.message
+      });
+    } finally {
+      syncInProgress = false;
+    }
+  });
+
   return app;
 }
 
@@ -53,6 +80,7 @@ function startServer(config = getConfig({ requireSecrets: false })) {
   const server = app.listen(config.port, () => {
     console.log(`Engagement Tracker listening on http://localhost:${config.port}`);
     console.log(`Webhook endpoint: POST http://localhost:${config.port}/sync-socials`);
+    console.log(`Dashboard refresh endpoint: POST http://localhost:${config.port}/refresh-dashboard`);
   });
 
   return server;

@@ -170,6 +170,15 @@ curl -X POST https://your-public-url/sync-socials \
   -d "{\"lookbackDays\":7,\"updateWeeklyRollups\":true}"
 ```
 
+Test the dashboard-only refresh webhook:
+
+```bash
+curl -X POST https://your-public-url/refresh-dashboard \
+  -H "Content-Type: application/json" \
+  -H "x-sync-secret: your-long-random-secret" \
+  -d "{\"source\":\"manual-test\"}"
+```
+
 ## 5. Public URL Options For A Local Coolify Install
 
 Google Apps Script must reach your app from Google's servers, so `localhost` and private LAN IPs will not work.
@@ -235,3 +244,12 @@ const ENGAGEMENT_TRACKER_WEBHOOK_SECRET = "same-value-as-WEBHOOK_SECRET";
 ```
 
 Then run `Sync Now`.
+
+To make Q1/Q2/Q3/Q4 date edits refresh automatically:
+
+1. Paste the latest `docs/apps-script-sync-now.gs` into Apps Script.
+2. Reload the spreadsheet.
+3. Run `Engagement Tracker > Install Date Auto-Refresh` once.
+4. Accept the Apps Script authorization prompt.
+
+After that, editing a non-empty date in column `A` on a tab named `Q1 Socials`, `Q2 Socials`, `Q3 Socials`, or `Q4 Socials` calls `/refresh-dashboard`.

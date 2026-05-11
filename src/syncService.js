@@ -53,6 +53,22 @@ async function runSync(config = getConfig(), options = {}) {
   };
 }
 
+async function refreshDashboard(config = getConfig()) {
+  const sheets = new GoogleSheetsClient(config.google);
+  const weeklyRollups = await sheets.updateWeeklyRollupSheets();
+  const analyticsTabs = config.google.updateAnalyticsTabs
+    ? await sheets.updateAnalyticsTabs()
+    : [];
+
+  return {
+    ok: true,
+    weeklyRollups,
+    analyticsTabs,
+    refreshedAt: new Date().toISOString()
+  };
+}
+
 module.exports = {
+  refreshDashboard,
   runSync
 };
