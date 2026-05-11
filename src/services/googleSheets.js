@@ -139,9 +139,10 @@ class GoogleSheetsClient {
       const row = postToRow(post, syncedAt, headers);
       const existingRowNumber = existingByPostId.get(post.postId);
       if (existingRowNumber) {
+        const existingRow = existingRows[existingRowNumber - 2] || [];
         updates.push({
           range: `${quoteSheetName(this.sheetTabName)}!A${existingRowNumber}:${columnToLetter(headers.length)}${existingRowNumber}`,
-          values: [row]
+          values: [preserveManualFields(headers, row, existingRow)]
         });
       } else {
         inserts.push(row);
@@ -550,6 +551,37 @@ function postToRow(post, syncedAt, headers = HEADER_ROW) {
   return headers.map((header) => byHeader[header] !== undefined ? byHeader[header] : "");
 }
 
+function preserveManualFields(headers, incomingRow, existingRow) {
+  const merged = [...incomingRow];
+  preserveIfIncomingBlank(headers, merged, existingRow, "Notes");
+  preserveIfIncomingBlank(headers, merged, existingRow, "Ad Spend ($)");
+  preserveBoostedValue(headers, merged, existingRow);
+  return merged;
+}
+
+function preserveIfIncomingBlank(headers, incomingRow, existingRow, headerName) {
+  const index = headers.indexOf(headerName);
+  if (index === -1) return;
+
+  const incoming = incomingRow[index];
+  const existing = existingRow[index];
+  const incomingBlank = incoming === "" || incoming === undefined || incoming === null || Number(incoming) === 0;
+  if (incomingBlank && existing !== undefined && existing !== "") {
+    incomingRow[index] = existing;
+  }
+}
+
+function preserveBoostedValue(headers, incomingRow, existingRow) {
+  const index = headers.indexOf("Boosted?");
+  if (index === -1) return;
+
+  const incoming = String(incomingRow[index] || "").toLowerCase();
+  const existing = existingRow[index];
+  if ((incoming === "" || incoming === "no") && existing) {
+    incomingRow[index] = existing;
+  }
+}
+
 function rowToObject(headers, row) {
   return headers.reduce((object, header, index) => {
     object[header] = row[index] !== undefined ? row[index] : "";
@@ -561,7 +593,6 @@ function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear }) 
   const updates = [];
   let section = "";
   let sectionHeader = [];
-  const today = endOfDay(new Date());
 
   values.forEach((row, rowIndex) => {
     const firstCell = row[0] || "";
@@ -573,7 +604,7 @@ function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear }) 
       return;
     }
 
-    if (!parsedDate || !section || parsedDate > today) {
+    if (!parsedDate || !section) {
       return;
     }
 

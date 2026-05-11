@@ -36,6 +36,9 @@ function getConfig({ requireSecrets = true } = {}) {
       graphVersion: process.env.META_GRAPH_VERSION || "v24.0",
       pageId: process.env.META_PAGE_ID || "",
       pageAccessToken: process.env.META_PAGE_ACCESS_TOKEN || "",
+      adAccountId: normalizeAdAccountId(process.env.META_AD_ACCOUNT_ID || ""),
+      adAccessToken: process.env.META_AD_ACCESS_TOKEN || "",
+      fetchAds: booleanFromEnv("META_FETCH_ADS", false),
       lookbackDays: numberFromEnv("LOOKBACK_DAYS", 14)
     },
     google: {
@@ -130,6 +133,12 @@ function decodeBase64Env(name) {
   const raw = process.env[name];
   if (!raw) return "";
   return Buffer.from(raw, "base64").toString("utf8");
+}
+
+function normalizeAdAccountId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.startsWith("act_") ? raw : `act_${raw}`;
 }
 
 function csvFromEnv(name) {

@@ -245,6 +245,8 @@ For Q1/Q2/Q3/Q4 dashboard auto-refresh:
 
 After that, entering a date in column `A` on `Q1 Socials`, `Q2 Socials`, `Q3 Socials`, or `Q4 Socials` calls `/refresh-dashboard` and fills the matching weekly sections from `Post-Level Tracking`.
 
+The edited date cell gets a note with the refresh status. If no note appears, the Apps Script edit trigger did not run.
+
 ## Desktop Executable Packaging
 
 This project includes `pkg` scripts for lightweight standalone executables.
@@ -327,7 +329,17 @@ Engagements, Cost per Engagement, Leads, Cost per Lead, Notes,
 Post ID, Permalink
 ```
 
-Important: the basic Page/post API does not supply ad spend or boosted-post status. Until Marketing API support is added, those two fields must be filled manually on `Post-Level Tracking`. Once you mark `Boosted?` or enter `Ad Spend ($)`, the `Ad + Boost Tracking` formula tab updates automatically.
+Important: the basic Page/post API does not supply ad spend or boosted-post status. If Marketing API settings are not configured, those two fields must be filled manually on `Post-Level Tracking`. Once you mark `Boosted?` or enter `Ad Spend ($)`, the `Ad + Boost Tracking` formula tab updates automatically.
+
+Optional automatic ad spend requires the Meta Marketing API:
+
+```bash
+META_FETCH_ADS=true
+META_AD_ACCOUNT_ID=act_your-ad-account-id
+META_AD_ACCESS_TOKEN=token-with-ads-read
+```
+
+The token must have access to that ad account and include `ads_read`. The app pulls ad-level insights and maps ads back to posts through the ad creative story ID. If Meta cannot provide a story ID for an ad, that ad cannot be matched to a row in `Post-Level Tracking` automatically.
 
 To rename the generated tabs, set these in `.env`:
 

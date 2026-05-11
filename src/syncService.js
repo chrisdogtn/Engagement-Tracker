@@ -1,5 +1,6 @@
 const { getConfig } = require("./config");
 const { processPost } = require("./logic/contentParser");
+const { applyAdSpendToPosts, MetaAdsApiClient } = require("./services/metaAdsApi");
 const { MetaApiClient } = require("./services/metaApi");
 const { GoogleSheetsClient } = require("./services/googleSheets");
 const { formatDateOnly, resolveSyncWindow } = require("./utils/dateRange");
@@ -19,7 +20,18 @@ async function runSync(config = getConfig(), options = {}) {
     startDate: syncWindow.startDate,
     endDate: syncWindow.endDate
   });
-  const processedPosts = rawPosts.map((post) => processPost(post, contentRules));
+  let adSync = { configured: false, adRows: 0, mappedPosts: 0 };
+  let hydratedPosts = rawPosts;
+  if (config.meta.fetchAds) {
+    const ads = new MetaAdsApiClient(config.meta);
+    adSync = await ads.fetchAdSpendByPost({
+      startDate: syncWindow.startDate,
+      endDate: syncWindow.endDate
+    });
+    hydratedPosts = applyAdSpendToPosts(rawPosts, adSync.spendByPostId);
+  }
+
+  const processedPosts = hydratedPosts.map((post) => processPost(post, contentRules));
   const upsertResult = await sheets.upsertPosts(processedPosts, contentRules);
 
   let weeklyRollups = [];
@@ -47,6 +59,11 @@ async function runSync(config = getConfig(), options = {}) {
     totalRowsTouched: upsertResult.totalRowsTouched,
     contentRules: contentRules.length,
     removedLegacyRuleSheet,
+    adSync: {
+      configured: adSync.configured,
+      adRows: adSync.adRows,
+      mappedPosts: adSync.mappedPosts
+    },
     weeklyRollups,
     analyticsTabs,
     syncedAt: new Date().toISOString()

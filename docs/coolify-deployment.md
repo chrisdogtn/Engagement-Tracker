@@ -96,6 +96,11 @@ META_PAGE_ID=your-page-id
 META_PAGE_ACCESS_TOKEN=your-page-token
 LOOKBACK_DAYS=14
 
+# Optional, for automatic paid/boosted ad spend mapping.
+META_FETCH_ADS=false
+META_AD_ACCOUNT_ID=act_your-ad-account-id
+META_AD_ACCESS_TOKEN=token-with-ads-read
+
 GOOGLE_SPREADSHEET_ID=your-google-sheet-id
 GOOGLE_SHEET_TAB_NAME=Post-Level Tracking
 
@@ -253,3 +258,23 @@ To make Q1/Q2/Q3/Q4 date edits refresh automatically:
 4. Accept the Apps Script authorization prompt.
 
 After that, editing a non-empty date in column `A` on a tab named `Q1 Socials`, `Q2 Socials`, `Q3 Socials`, or `Q4 Socials` calls `/refresh-dashboard`.
+
+The edited date cell receives a note with the HTTP status and server response. If you type a date and see no note, the Apps Script edit trigger did not run. Re-run `Engagement Tracker > Install Date Auto-Refresh`.
+
+## 7. Optional Meta Ads Spend Setup
+
+`ads_read` permission alone is not enough. The app also needs:
+
+```bash
+META_FETCH_ADS=true
+META_AD_ACCOUNT_ID=act_your-ad-account-id
+META_AD_ACCESS_TOKEN=token-with-ads-read
+```
+
+Notes:
+
+- `META_AD_ACCOUNT_ID` must be the ad account that paid for the boosts/ads.
+- `META_AD_ACCESS_TOKEN` should be a User/System User token with ad account access and `ads_read`.
+- A Page access token usually is not enough for ad account insights.
+- The app pulls ad-level insights from the Marketing API and tries to map ads back to Page posts through the ad creative story ID.
+- Some ads cannot be mapped back to an organic Page post. Those will not update the post row automatically.

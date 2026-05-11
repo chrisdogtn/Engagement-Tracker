@@ -121,23 +121,55 @@ function handleDashboardDateEdit(e) {
     sheetName: sheetName,
     row: e.range.getRow(),
     value: e.value,
-  });
+  }, e.range);
 }
 
-function postToEngagementTracker_(path, payload) {
+function postToEngagementTracker_(path, payload, statusRange) {
   const baseUrl = ENGAGEMENT_TRACKER_WEBHOOK_URL.replace(/\/sync-socials\/?$/, "");
-  const response = UrlFetchApp.fetch(baseUrl + path, {
-    method: "post",
-    contentType: "application/json",
-    headers: {
-      "x-sync-secret": ENGAGEMENT_TRACKER_WEBHOOK_SECRET,
-    },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true,
-  });
+  try {
+    const response = UrlFetchApp.fetch(baseUrl + path, {
+      method: "post",
+      contentType: "application/json",
+      headers: {
+        "x-sync-secret": ENGAGEMENT_TRACKER_WEBHOOK_SECRET,
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true,
+    });
 
-  return {
-    status: response.getResponseCode(),
-    body: response.getContentText(),
-  };
+    const result = {
+      status: response.getResponseCode(),
+      body: response.getContentText(),
+    };
+
+    if (statusRange) {
+      statusRange.setNote(
+        "Engagement Tracker refresh " +
+          (result.status >= 200 && result.status < 300 ? "succeeded" : "failed") +
+          " at " +
+          new Date().toLocaleString() +
+          "\nHTTP " +
+          result.status +
+          "\n" +
+          result.body.substring(0, 400),
+      );
+      SpreadsheetApp.getActive().toast("Engagement Tracker dashboard refresh: HTTP " + result.status);
+    }
+
+    return result;
+  } catch (error) {
+    if (statusRange) {
+      statusRange.setNote(
+        "Engagement Tracker refresh failed at " +
+          new Date().toLocaleString() +
+          "\n" +
+          error.message,
+      );
+      SpreadsheetApp.getActive().toast("Engagement Tracker dashboard refresh failed");
+    }
+    return {
+      status: 0,
+      body: error.message,
+    };
+  }
 }
