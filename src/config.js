@@ -46,6 +46,7 @@ function getConfig({ requireSecrets = true } = {}) {
       sheetTabName: process.env.GOOGLE_SHEET_TAB_NAME || "Post-Level Tracking",
       weeklyRollupSheets: csvFromEnv("WEEKLY_ROLLUP_SHEETS"),
       weeklyRollupSheetPattern: process.env.WEEKLY_ROLLUP_SHEET_PATTERN || DEFAULT_DASHBOARD_PATTERN,
+      weeklyRollupBoundaryMode: process.env.WEEKLY_ROLLUP_BOUNDARY_MODE || "exclude-boundaries",
       dashboardYear: numberFromEnv("DASHBOARD_YEAR", new Date().getFullYear()),
       updateWeeklyRollups: booleanFromEnv("UPDATE_WEEKLY_ROLLUPS", true),
       updateAnalyticsTabs: booleanFromEnv("UPDATE_ANALYTICS_TABS", true),

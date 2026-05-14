@@ -6,7 +6,7 @@ A modular Node.js automation bridge that pulls Facebook Page post metrics from t
 
 - Runs an Express server with `POST /sync-socials` for on-demand syncs from Google Sheets.
 - Runs a weekly cron sync every Monday at 2:00 AM.
-- Pulls recent Facebook Page posts for the last `LOOKBACK_DAYS`, defaulting to 14 days, or a specific requested date range.
+- Pulls Facebook Page posts for the current week by default, or a specific requested date range / lookback window.
 - Fetches post reach and click insights from Meta.
 - Upserts rows by `Post ID`, so repeated syncs update existing posts instead of duplicating them.
 - Uses app-level content rules from `config/content-rules.default.json` or `CONTENT_RULES_FILE`.
@@ -103,7 +103,7 @@ curl -X POST http://localhost:3000/sync-socials \
   -d "{\"startDate\":\"2026-04-05\",\"endDate\":\"2026-04-12\",\"updateWeeklyRollups\":true}"
 ```
 
-If no range is supplied, the app uses `LOOKBACK_DAYS`.
+If no range or `lookbackDays` is supplied, the app syncs the current week from Sunday through the current day. To force an older rolling-window sync, pass `lookbackDays` in the webhook payload.
 
 Refresh dashboard/rollup tabs without pulling Meta:
 
@@ -241,7 +241,7 @@ const ENGAGEMENT_TRACKER_WEBHOOK_SECRET = 'replace-with-the-same-secret-from-env
 
 Reload the spreadsheet. You will see a new `Engagement Tracker > Sync Now` menu item.
 
-When you click it, the script asks whether you want a specific date range. If you choose no, the app uses `LOOKBACK_DAYS`.
+When you click it, the script asks whether you want a specific date range. If you choose no, the app syncs the current week.
 
 For a button-style experience, insert a Drawing or Image in the sheet, label it `Sync Now`, click the three-dot menu on the image/drawing, choose Assign script, and enter:
 
@@ -290,7 +290,7 @@ The app writes these columns to `Post-Level Tracking`:
 Synced At, Post ID, Date, Post Message/Text, Content Type, Total Reach,
 Total Engagements, Reactions, Comments, Shares, Link Clicks,
 Engagement Rate, Estimated Lead Value, Permalink, Format, Video Views (3s),
-Avg Watch Time, Boosted?, Ad Spend ($), Notes
+Avg Watch Time, Boosted?, Ad Spend ($), Notes, Ad Leads
 ```
 
 ## Content Type Rules
@@ -342,7 +342,7 @@ Engagements, Cost per Engagement, Leads, Cost per Lead, Notes,
 Post ID, Permalink
 ```
 
-Important: the basic Page/post API does not supply ad spend or boosted-post status. If Marketing API settings are not configured, those two fields must be filled manually on `Post-Level Tracking`. Once you mark `Boosted?` or enter `Ad Spend ($)`, the `Ad + Boost Tracking` formula tab updates automatically.
+Important: the basic Page/post API does not supply ad spend, boosted-post status, or ad leads. If Marketing API settings are not configured, those fields must be filled manually on `Post-Level Tracking`. Once you mark `Boosted?`, enter `Ad Spend ($)`, or populate `Ad Leads`, the `Ad + Boost Tracking` formula tab updates automatically.
 
 Optional automatic ad spend requires the Meta Marketing API:
 
@@ -384,10 +384,17 @@ For the section-style layout in your screenshot, the app scans column `A` for da
 Supported automatic sections:
 
 - `Total Reach`: fills `Weekly Actual`.
-- `Total Engagements`: fills `Weekly Actual`, plus `Total Comments`, `Total Shares`, `Total Video Views`, and `Total Clicks` when those headers exist in the section row.
+- `Total Engagements`: fills `Weekly Actual`, plus `Total Reactions`, `Total Comments`, `Total Shares`, `Total Video Views`, and `Total Clicks` when those headers exist in the section row.
 - `Engagement Rate`: fills `Weekly Actual` as total engagements divided by total reach for that week.
 
-The week window uses the date in column `A` as the week end date. Example: `4/12` summarizes posts from `4/5` through `4/12`.
+The week window uses the date in column `A` as the week end date. By default, Sunday boundary dates are excluded, so `4/12` summarizes posts after `4/5` and before `4/12`, which means Monday through Saturday for a Sunday-ended week.
+
+You can change the boundary behavior in `.env`:
+
+```bash
+# include-boundaries, exclude-start, exclude-end, or exclude-boundaries
+WEEKLY_ROLLUP_BOUNDARY_MODE=exclude-boundaries
+```
 
 Set the year used for `M/D` dashboard dates:
 

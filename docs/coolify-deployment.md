@@ -94,6 +94,7 @@ WEBHOOK_SECRET=your-long-random-secret
 META_GRAPH_VERSION=v24.0
 META_PAGE_ID=your-page-id
 META_PAGE_ACCESS_TOKEN=your-page-token
+# Optional. Only used when a sync request explicitly sends lookbackDays.
 LOOKBACK_DAYS=14
 
 # Optional, for automatic paid/boosted ad spend mapping.
@@ -107,6 +108,7 @@ GOOGLE_SHEET_TAB_NAME=Post-Level Tracking
 CONTENT_RULES_FILE=./config/content-rules.default.json
 UPDATE_WEEKLY_ROLLUPS=true
 WEEKLY_ROLLUP_SHEET_PATTERN=^Q[1-4] Socials$
+WEEKLY_ROLLUP_BOUNDARY_MODE=exclude-boundaries
 DASHBOARD_YEAR=2026
 UPDATE_ANALYTICS_TABS=true
 CONTENT_PERFORMANCE_SHEET_NAME=Content Performance Breakdown

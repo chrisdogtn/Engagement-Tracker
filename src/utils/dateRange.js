@@ -17,6 +17,21 @@ function resolveSyncWindow({ startDate, endDate, lookbackDays, now = new Date() 
     };
   }
 
+  if (lookbackDays !== undefined && lookbackDays !== null && lookbackDays !== "") {
+    return resolveLookbackWindow({ lookbackDays, now });
+  }
+
+  const start = startOfCurrentWeek(now);
+  const end = endOfDay(now);
+
+  return {
+    startDate: start,
+    endDate: end,
+    label: `current week (${formatDateOnly(start)} to ${formatDateOnly(end)})`
+  };
+}
+
+function resolveLookbackWindow({ lookbackDays, now = new Date() } = {}) {
   const days = Number(lookbackDays || 14);
   if (!Number.isFinite(days) || days < 1 || days > 90) {
     throw new Error("lookbackDays must be between 1 and 90.");
@@ -31,6 +46,13 @@ function resolveSyncWindow({ startDate, endDate, lookbackDays, now = new Date() 
     endDate: end,
     label: `last ${days} days`
   };
+}
+
+function startOfCurrentWeek(date, weekStartDay = 0) {
+  const start = startOfDay(new Date(date));
+  const offset = (start.getDay() - weekStartDay + 7) % 7;
+  start.setDate(start.getDate() - offset);
+  return start;
 }
 
 function parseDateInput(value, fallbackYear = new Date().getFullYear()) {
@@ -101,5 +123,7 @@ module.exports = {
   parseDateInput,
   startOfDay,
   endOfDay,
-  formatDateOnly
+  formatDateOnly,
+  startOfCurrentWeek,
+  resolveLookbackWindow
 };

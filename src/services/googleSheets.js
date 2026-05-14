@@ -23,7 +23,8 @@ const HEADER_ROW = [
   "Avg Watch Time",
   "Boosted?",
   "Ad Spend ($)",
-  "Notes"
+  "Notes",
+  "Ad Leads"
 ];
 
 const CONTENT_PERFORMANCE_HEADER_ROW = [
@@ -58,6 +59,7 @@ class GoogleSheetsClient {
     sheetTabName,
     weeklyRollupSheets,
     weeklyRollupSheetPattern,
+    weeklyRollupBoundaryMode,
     dashboardYear,
     contentPerformanceSheetName,
     adBoostSheetName,
@@ -70,6 +72,7 @@ class GoogleSheetsClient {
     this.sheetTabName = sheetTabName;
     this.weeklyRollupSheets = weeklyRollupSheets || [];
     this.weeklyRollupSheetPattern = weeklyRollupSheetPattern || "^Q[1-4] Socials$";
+    this.weeklyRollupBoundaryMode = weeklyRollupBoundaryMode || "exclude-boundaries";
     this.dashboardYear = dashboardYear || new Date().getFullYear();
     this.contentPerformanceSheetName = contentPerformanceSheetName || "Content Performance Breakdown";
     this.adBoostSheetName = adBoostSheetName || "Ad + Boost Tracking";
@@ -311,7 +314,8 @@ class GoogleSheetsClient {
     const values = response.data.values || [];
     const updates = buildWeeklySectionUpdates(values, posts, {
       sheetName,
-      dashboardYear: this.dashboardYear
+      dashboardYear: this.dashboardYear,
+      boundaryMode: this.weeklyRollupBoundaryMode
     });
 
     if (updates.length) {
@@ -545,6 +549,7 @@ function postToRow(post, syncedAt, headers = HEADER_ROW) {
     "Avg Watch Time": post.avgWatchTime,
     "Boosted?": post.boosted,
     "Ad Spend ($)": post.adSpend || "",
+    "Ad Leads": post.adLeads || "",
     Notes: ""
   };
 
@@ -555,6 +560,7 @@ function preserveManualFields(headers, incomingRow, existingRow) {
   const merged = [...incomingRow];
   preserveIfIncomingBlank(headers, merged, existingRow, "Notes");
   preserveIfIncomingBlank(headers, merged, existingRow, "Ad Spend ($)");
+  preserveIfIncomingBlank(headers, merged, existingRow, "Ad Leads");
   preserveBoostedValue(headers, merged, existingRow);
   return merged;
 }
@@ -589,7 +595,7 @@ function rowToObject(headers, row) {
   }, {});
 }
 
-function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear }) {
+function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear, boundaryMode = "exclude-boundaries" }) {
   const updates = [];
   let section = "";
   let sectionHeader = [];
@@ -608,7 +614,7 @@ function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear }) 
       return;
     }
 
-    const stats = summarizePostsForWeek(posts, parsedDate);
+    const stats = summarizePostsForWeek(posts, parsedDate, boundaryMode);
     const rowNumber = rowIndex + 1;
     const weeklyActualColumn = findColumnIndex(sectionHeader, "weekly actual", 2);
 
@@ -616,9 +622,12 @@ function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear }) 
       updates.push(cellUpdate(sheetName, rowNumber, weeklyActualColumn, stats.reach));
     } else if (section.includes("total engagement")) {
       updates.push(cellUpdate(sheetName, rowNumber, weeklyActualColumn, stats.engagements));
+      addOptionalMetricUpdate(updates, sheetName, rowNumber, sectionHeader, "reaction", stats.reactions);
       addOptionalMetricUpdate(updates, sheetName, rowNumber, sectionHeader, "comment", stats.comments);
       addOptionalMetricUpdate(updates, sheetName, rowNumber, sectionHeader, "share", stats.shares);
-      addOptionalMetricUpdate(updates, sheetName, rowNumber, sectionHeader, "video", stats.videoViews);
+      if (!addOptionalMetricUpdate(updates, sheetName, rowNumber, sectionHeader, "video", stats.videoViews)) {
+        addOptionalMetricUpdate(updates, sheetName, rowNumber, sectionHeader, "view", stats.videoViews);
+      }
       addOptionalMetricUpdate(updates, sheetName, rowNumber, sectionHeader, "click", stats.linkClicks);
     } else if (section.includes("engagement rate")) {
       updates.push(cellUpdate(sheetName, rowNumber, weeklyActualColumn, stats.engagementRate));
@@ -628,19 +637,28 @@ function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear }) 
   return updates;
 }
 
-function summarizePostsForWeek(posts, endDate) {
+function summarizePostsForWeek(posts, endDate, boundaryMode = "exclude-boundaries") {
+  const normalizedBoundaryMode = normalizeBoundaryMode(boundaryMode);
   const start = startOfDay(new Date(endDate));
   start.setDate(start.getDate() - 7);
   const end = endOfDay(endDate);
+  const includeStart = normalizedBoundaryMode === "include-boundaries" || normalizedBoundaryMode === "exclude-end";
+  const includeEnd = normalizedBoundaryMode === "include-boundaries" || normalizedBoundaryMode === "exclude-start";
+  const startBoundary = includeStart ? start : endOfDay(start);
+  const endBoundary = includeEnd ? end : startOfDay(endDate);
 
   const inWindow = posts.filter((post) => {
     const postDate = parsePostDate(post.Date);
-    return postDate && postDate >= start && postDate <= end;
+    if (!postDate) return false;
+    const afterStart = includeStart ? postDate >= startBoundary : postDate > startBoundary;
+    const beforeEnd = includeEnd ? postDate <= endBoundary : postDate < endBoundary;
+    return afterStart && beforeEnd;
   });
 
   const totals = inWindow.reduce((summary, post) => {
     summary.reach += toNumber(post["Total Reach"]);
     summary.engagements += toNumber(post["Total Engagements"]);
+    summary.reactions += toNumber(post.Reactions);
     summary.comments += toNumber(post.Comments);
     summary.shares += toNumber(post.Shares);
     summary.linkClicks += toNumber(post["Link Clicks"]);
@@ -649,6 +667,7 @@ function summarizePostsForWeek(posts, endDate) {
   }, {
     reach: 0,
     engagements: 0,
+    reactions: 0,
     comments: 0,
     shares: 0,
     linkClicks: 0,
@@ -657,6 +676,18 @@ function summarizePostsForWeek(posts, endDate) {
 
   totals.engagementRate = totals.reach ? totals.engagements / totals.reach : 0;
   return totals;
+}
+
+function normalizeBoundaryMode(value) {
+  const normalized = String(value || "exclude-boundaries").toLowerCase().trim();
+  return [
+    "include-boundaries",
+    "exclude-start",
+    "exclude-end",
+    "exclude-boundaries"
+  ].includes(normalized)
+    ? normalized
+    : "exclude-boundaries";
 }
 
 function buildContentPerformanceFormula(postLevelSheetName) {
@@ -670,7 +701,7 @@ function buildAdBoostFormula(postLevelSheetName) {
   const blankRow = `{${AD_BOOST_HEADER_ROW.map((header, index) => `"${index === 0 ? "No boosted/ad rows yet" : ""}"`).join(",")}}`;
   const blankColumn = `IF(LEN(${source}!B2:B),"","")`;
 
-  return `=VSTACK(${headers},IFNA(FILTER(HSTACK(${source}!C2:C,${source}!D2:D,IF(${source}!R2:R="Yes","Boosted","Ad"),${blankColumn},${source}!S2:S,${source}!F2:F,${source}!G2:G,IFERROR(${source}!S2:S/${source}!G2:G,),${blankColumn},${blankColumn},${source}!T2:T,${source}!B2:B,${source}!N2:N),((${source}!R2:R="Yes")+(${source}!S2:S>0))>0),${blankRow}))`;
+  return `=VSTACK(${headers},IFNA(FILTER(HSTACK(${source}!C2:C,${source}!D2:D,IF(${source}!R2:R="Yes","Boosted","Ad"),${blankColumn},${source}!S2:S,${source}!F2:F,${source}!G2:G,IFERROR(${source}!S2:S/${source}!G2:G,),${source}!U2:U,IFERROR(${source}!S2:S/${source}!U2:U,),${source}!T2:T,${source}!B2:B,${source}!N2:N),((${source}!R2:R="Yes")+(${source}!S2:S>0))>0),${blankRow}))`;
 }
 
 function buildContentPerformanceRows(posts) {
@@ -717,7 +748,7 @@ function buildAdBoostRows(posts) {
     .map((post) => {
       const amountSpent = toNumber(post["Ad Spend ($)"]);
       const engagements = toNumber(post["Total Engagements"]);
-      const leads = "";
+      const leads = toNumber(post["Ad Leads"]);
 
       return [
         post.Date || "",
@@ -728,8 +759,8 @@ function buildAdBoostRows(posts) {
         toNumber(post["Total Reach"]),
         engagements,
         amountSpent && engagements ? amountSpent / engagements : "",
-        leads,
-        "",
+        leads || "",
+        amountSpent && leads ? amountSpent / leads : "",
         post.Notes || "",
         post["Post ID"] || "",
         post.Permalink || ""
@@ -745,7 +776,9 @@ function addOptionalMetricUpdate(updates, sheetName, rowNumber, headerRow, label
   const columnIndex = findColumnIndex(headerRow, label, -1);
   if (columnIndex !== -1) {
     updates.push(cellUpdate(sheetName, rowNumber, columnIndex, value));
+    return true;
   }
+  return false;
 }
 
 function cellUpdate(sheetName, rowNumber, zeroBasedColumn, value) {

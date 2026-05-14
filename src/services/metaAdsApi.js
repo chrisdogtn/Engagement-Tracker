@@ -40,18 +40,21 @@ class MetaAdsApiClient {
       const creative = await this.fetchAdCreative(insight.ad_id);
       const postIds = extractPostIdsFromCreative(creative);
       const spend = toNumber(insight.spend);
+      const leads = leadActionCount(insight.actions);
 
       for (const postId of postIds) {
         const existing = spendByPostId.get(postId) || {
           adSpend: 0,
           paidReach: 0,
           paidClicks: 0,
+          adLeads: 0,
           adIds: []
         };
 
         existing.adSpend += spend;
         existing.paidReach += toNumber(insight.reach);
         existing.paidClicks += toNumber(insight.clicks);
+        existing.adLeads += leads;
         existing.adIds.push(insight.ad_id);
         spendByPostId.set(postId, existing);
       }
@@ -141,6 +144,7 @@ function applyAdSpendToPosts(posts, spendByPostId) {
       adSpend: paid.adSpend,
       paidReach: paid.paidReach,
       paidClicks: paid.paidClicks,
+      adLeads: paid.adLeads,
       adIds: paid.adIds
     };
   });
@@ -165,8 +169,29 @@ function toNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function leadActionCount(actions) {
+  if (!Array.isArray(actions)) return 0;
+
+  return actions.reduce((total, action) => {
+    const type = String(action.action_type || "").toLowerCase();
+    return isLeadAction(type) ? total + toNumber(action.value) : total;
+  }, 0);
+}
+
+function isLeadAction(actionType) {
+  return [
+    "lead",
+    "onsite_conversion.lead_grouped",
+    "onsite_conversion.messaging_conversation_started_7d",
+    "offsite_conversion.fb_pixel_lead",
+    "offsite_conversion.lead",
+    "leadgen_grouped"
+  ].some((candidate) => actionType === candidate || actionType.endsWith(`.${candidate}`));
+}
+
 module.exports = {
   MetaAdsApiClient,
   applyAdSpendToPosts,
-  extractPostIdsFromCreative
+  extractPostIdsFromCreative,
+  leadActionCount
 };

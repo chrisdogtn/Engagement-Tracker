@@ -11,7 +11,7 @@ async function runSync(config = getConfig(), options = {}) {
   const syncWindow = resolveSyncWindow({
     startDate: options.startDate,
     endDate: options.endDate,
-    lookbackDays: options.lookbackDays || config.meta.lookbackDays
+    lookbackDays: options.lookbackDays
   });
   const contentRules = config.contentRules;
   const removedLegacyRuleSheet = await sheets.removeLegacyContentRulesSheet();
