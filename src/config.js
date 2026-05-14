@@ -49,9 +49,11 @@ function getConfig({ requireSecrets = true } = {}) {
       weeklyRollupBoundaryMode: process.env.WEEKLY_ROLLUP_BOUNDARY_MODE || "exclude-boundaries",
       dashboardYear: numberFromEnv("DASHBOARD_YEAR", new Date().getFullYear()),
       updateWeeklyRollups: booleanFromEnv("UPDATE_WEEKLY_ROLLUPS", true),
+      weeklyRollupSource: process.env.WEEKLY_ROLLUP_SOURCE || "snapshots",
       updateAnalyticsTabs: booleanFromEnv("UPDATE_ANALYTICS_TABS", true),
       contentPerformanceSheetName: process.env.CONTENT_PERFORMANCE_SHEET_NAME || "Content Performance Breakdown",
       adBoostSheetName: process.env.AD_BOOST_SHEET_NAME || "Ad + Boost Tracking",
+      metricSnapshotSheetName: process.env.METRIC_SNAPSHOT_SHEET_NAME || "Post Metric Snapshots",
       applicationCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS || "",
       serviceAccountJson: parseServiceAccountJson(
         process.env.GOOGLE_SERVICE_ACCOUNT_JSON || decodeBase64Env("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")

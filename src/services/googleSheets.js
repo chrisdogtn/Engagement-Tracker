@@ -53,6 +53,19 @@ const AD_BOOST_HEADER_ROW = [
   "Permalink"
 ];
 
+const METRIC_SNAPSHOT_HEADER_ROW = [
+  "Snapshot At",
+  "Post ID",
+  "Post Date",
+  "Total Reach",
+  "Total Engagements",
+  "Reactions",
+  "Comments",
+  "Shares",
+  "Link Clicks",
+  "Video Views (3s)"
+];
+
 class GoogleSheetsClient {
   constructor({
     spreadsheetId,
@@ -63,6 +76,8 @@ class GoogleSheetsClient {
     dashboardYear,
     contentPerformanceSheetName,
     adBoostSheetName,
+    metricSnapshotSheetName,
+    weeklyRollupSource,
     applicationCredentials,
     serviceAccountJson,
     clientEmail,
@@ -76,6 +91,8 @@ class GoogleSheetsClient {
     this.dashboardYear = dashboardYear || new Date().getFullYear();
     this.contentPerformanceSheetName = contentPerformanceSheetName || "Content Performance Breakdown";
     this.adBoostSheetName = adBoostSheetName || "Ad + Boost Tracking";
+    this.metricSnapshotSheetName = metricSnapshotSheetName || "Post Metric Snapshots";
+    this.weeklyRollupSource = weeklyRollupSource || "snapshots";
     this.auth = buildAuth({ applicationCredentials, serviceAccountJson, clientEmail, privateKey });
     this.sheets = google.sheets({ version: "v4", auth: this.auth });
   }
@@ -187,13 +204,78 @@ class GoogleSheetsClient {
     return rows.map((row) => rowToObject(headers, row));
   }
 
+  async recordPostMetricSnapshot(posts = null) {
+    await this.ensureMetricSnapshotSheet();
+    const snapshotPosts = posts || await this.readPostLevelObjects();
+    if (!snapshotPosts.length) {
+      return { sheetName: this.metricSnapshotSheetName, rowsInserted: 0 };
+    }
+
+    const snapshotAt = new Date().toISOString();
+    const rows = snapshotPosts
+      .filter((post) => post["Post ID"])
+      .map((post) => metricSnapshotToRow(post, snapshotAt));
+
+    await this.sheets.spreadsheets.values.append({
+      spreadsheetId: this.spreadsheetId,
+      range: `${quoteSheetName(this.metricSnapshotSheetName)}!A:${columnToLetter(METRIC_SNAPSHOT_HEADER_ROW.length)}`,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: {
+        values: rows
+      }
+    });
+
+    return {
+      sheetName: this.metricSnapshotSheetName,
+      rowsInserted: rows.length
+    };
+  }
+
+  async ensureMetricSnapshotSheet() {
+    const sheet = await this.ensureSheetExists(this.metricSnapshotSheetName);
+    const range = `${quoteSheetName(this.metricSnapshotSheetName)}!A1:${columnToLetter(METRIC_SNAPSHOT_HEADER_ROW.length)}1`;
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range
+    });
+    const existing = response.data.values && response.data.values[0] ? response.data.values[0] : [];
+
+    if (!arraysEqual(existing, METRIC_SNAPSHOT_HEADER_ROW)) {
+      await this.sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range,
+        valueInputOption: "RAW",
+        requestBody: {
+          values: [METRIC_SNAPSHOT_HEADER_ROW]
+        }
+      });
+    }
+
+    await this.hideSheetById(sheet.properties.sheetId);
+  }
+
+  async readMetricSnapshots() {
+    await this.ensureMetricSnapshotSheet();
+    const range = `${quoteSheetName(this.metricSnapshotSheetName)}!A2:${columnToLetter(METRIC_SNAPSHOT_HEADER_ROW.length)}`;
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range
+    });
+    const rows = response.data.values || [];
+    return rows.map((row) => rowToObject(METRIC_SNAPSHOT_HEADER_ROW, row));
+  }
+
   async updateWeeklyRollupSheets() {
     const posts = await this.readPostLevelObjects();
+    const snapshots = this.weeklyRollupSource === "snapshots"
+      ? await this.readMetricSnapshots()
+      : [];
     const sheetNames = await this.resolveWeeklyRollupSheetNames();
     const results = [];
 
     for (const sheetName of sheetNames) {
-      const result = await this.updateSectionStyleWeeklySheet(sheetName, posts);
+      const result = await this.updateSectionStyleWeeklySheet(sheetName, posts, snapshots);
       results.push(result);
     }
 
@@ -299,7 +381,7 @@ class GoogleSheetsClient {
       .filter((title) => pattern.test(title));
   }
 
-  async updateSectionStyleWeeklySheet(sheetName, posts) {
+  async updateSectionStyleWeeklySheet(sheetName, posts, snapshots = []) {
     const range = `${quoteSheetName(sheetName)}!A1:L250`;
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
@@ -315,7 +397,9 @@ class GoogleSheetsClient {
     const updates = buildWeeklySectionUpdates(values, posts, {
       sheetName,
       dashboardYear: this.dashboardYear,
-      boundaryMode: this.weeklyRollupBoundaryMode
+      boundaryMode: this.weeklyRollupBoundaryMode,
+      snapshots,
+      rollupSource: this.weeklyRollupSource
     });
 
     if (updates.length) {
@@ -332,6 +416,29 @@ class GoogleSheetsClient {
       sheetName,
       updatedCells: updates.length
     };
+  }
+
+  async hideSheetById(sheetId) {
+    const spreadsheet = await this.getSpreadsheet();
+    const sheet = spreadsheet.sheets.find((candidate) => candidate.properties.sheetId === sheetId);
+    if (!sheet || sheet.properties.hidden) return;
+
+    await this.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            updateSheetProperties: {
+              properties: {
+                sheetId,
+                hidden: true
+              },
+              fields: "hidden"
+            }
+          }
+        ]
+      }
+    });
   }
 
   async applyPostLevelFormatting(headers, contentRules) {
@@ -442,8 +549,9 @@ class GoogleSheetsClient {
 
   async ensureSheetExists(title) {
     const spreadsheet = await this.getSpreadsheet();
-    if (spreadsheet.sheets.some((sheet) => sheet.properties.title === title)) {
-      return;
+    const existingSheet = spreadsheet.sheets.find((sheet) => sheet.properties.title === title);
+    if (existingSheet) {
+      return existingSheet;
     }
 
     await this.sheets.spreadsheets.batchUpdate({
@@ -460,6 +568,9 @@ class GoogleSheetsClient {
         ]
       }
     });
+
+    const refreshed = await this.getSpreadsheet();
+    return refreshed.sheets.find((sheet) => sheet.properties.title === title);
   }
 
   async getSheetProperty(title) {
@@ -595,7 +706,13 @@ function rowToObject(headers, row) {
   }, {});
 }
 
-function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear, boundaryMode = "exclude-boundaries" }) {
+function buildWeeklySectionUpdates(values, posts, {
+  sheetName,
+  dashboardYear,
+  boundaryMode = "exclude-boundaries",
+  snapshots = [],
+  rollupSource = "snapshots"
+}) {
   const updates = [];
   let section = "";
   let sectionHeader = [];
@@ -614,7 +731,10 @@ function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear, bo
       return;
     }
 
-    const stats = summarizePostsForWeek(posts, parsedDate, boundaryMode);
+    const stats = rollupSource === "snapshots" && snapshots.length
+      ? summarizeSnapshotsForWeek(posts, snapshots, parsedDate, boundaryMode)
+      : summarizePostsForWeek(posts, parsedDate, boundaryMode);
+    if (!stats) return;
     const rowNumber = rowIndex + 1;
     const weeklyActualColumn = findColumnIndex(sectionHeader, "weekly actual", 2);
 
@@ -635,6 +755,131 @@ function buildWeeklySectionUpdates(values, posts, { sheetName, dashboardYear, bo
   });
 
   return updates;
+}
+
+function metricSnapshotToRow(post, snapshotAt) {
+  return [
+    snapshotAt,
+    post["Post ID"] || "",
+    post.Date || "",
+    toNumber(post["Total Reach"]),
+    toNumber(post["Total Engagements"]),
+    toNumber(post.Reactions),
+    toNumber(post.Comments),
+    toNumber(post.Shares),
+    toNumber(post["Link Clicks"]),
+    toNumber(post["Video Views (3s)"])
+  ];
+}
+
+function summarizeSnapshotsForWeek(posts, snapshots, endDate, boundaryMode = "exclude-boundaries") {
+  const normalizedBoundaryMode = normalizeBoundaryMode(boundaryMode);
+  const start = startOfDay(new Date(endDate));
+  start.setDate(start.getDate() - 7);
+  const end = endOfDay(endDate);
+  const includeStart = normalizedBoundaryMode === "include-boundaries" || normalizedBoundaryMode === "exclude-end";
+  const includeEnd = normalizedBoundaryMode === "include-boundaries" || normalizedBoundaryMode === "exclude-start";
+  const startBoundary = includeStart ? start : endOfDay(start);
+  const endBoundary = includeEnd ? end : startOfDay(endDate);
+  const snapshotsByPost = groupSnapshotsByPost(snapshots);
+  const postDateById = new Map(posts.map((post) => [post["Post ID"], parsePostDate(post.Date)]));
+
+  const totals = {
+    reach: 0,
+    engagements: 0,
+    reactions: 0,
+    comments: 0,
+    shares: 0,
+    linkClicks: 0,
+    videoViews: 0
+  };
+  let coveredPosts = 0;
+
+  for (const [postId, postSnapshots] of snapshotsByPost.entries()) {
+    const endSnapshot = findSnapshotAtOrBefore(postSnapshots, endBoundary, includeEnd) ||
+      findSnapshotAtOrAfter(postSnapshots, endBoundary, includeEnd, 2);
+    if (!endSnapshot) continue;
+
+    const startSnapshot = findSnapshotAtOrBefore(postSnapshots, startBoundary, includeStart) ||
+      findSnapshotAtOrAfter(postSnapshots, startBoundary, includeStart, 2);
+    const postDate = postDateById.get(postId);
+    const createdInWindow = postDate && postDate > startBoundary && postDate < endBoundary;
+    if (!startSnapshot && !createdInWindow) {
+      continue;
+    }
+
+    coveredPosts += 1;
+    addSnapshotDelta(totals, startSnapshot, endSnapshot);
+  }
+
+  if (!coveredPosts) return null;
+  totals.engagementRate = totals.reach ? totals.engagements / totals.reach : 0;
+  return totals;
+}
+
+function groupSnapshotsByPost(snapshots) {
+  const groups = new Map();
+
+  for (const snapshot of snapshots) {
+    const postId = snapshot["Post ID"];
+    const snapshotDate = parsePostDate(snapshot["Snapshot At"]);
+    if (!postId || !snapshotDate) continue;
+
+    const current = groups.get(postId) || [];
+    current.push({
+      snapshotAt: snapshotDate,
+      reach: toNumber(snapshot["Total Reach"]),
+      engagements: toNumber(snapshot["Total Engagements"]),
+      reactions: toNumber(snapshot.Reactions),
+      comments: toNumber(snapshot.Comments),
+      shares: toNumber(snapshot.Shares),
+      linkClicks: toNumber(snapshot["Link Clicks"]),
+      videoViews: toNumber(snapshot["Video Views (3s)"])
+    });
+    groups.set(postId, current);
+  }
+
+  for (const group of groups.values()) {
+    group.sort((left, right) => left.snapshotAt - right.snapshotAt);
+  }
+
+  return groups;
+}
+
+function findSnapshotAtOrBefore(snapshots, boundary, includeBoundary) {
+  let match = null;
+
+  for (const snapshot of snapshots) {
+    const inRange = includeBoundary ? snapshot.snapshotAt <= boundary : snapshot.snapshotAt < boundary;
+    if (inRange) {
+      match = snapshot;
+    } else {
+      break;
+    }
+  }
+
+  return match;
+}
+
+function findSnapshotAtOrAfter(snapshots, boundary, includeBoundary, maxDaysAfter = 0) {
+  const maxTime = boundary.getTime() + maxDaysAfter * 24 * 60 * 60 * 1000;
+
+  for (const snapshot of snapshots) {
+    const timestamp = snapshot.snapshotAt.getTime();
+    const inRange = includeBoundary ? timestamp >= boundary.getTime() : timestamp > boundary.getTime();
+    if (inRange && timestamp <= maxTime) {
+      return snapshot;
+    }
+  }
+
+  return null;
+}
+
+function addSnapshotDelta(totals, startSnapshot, endSnapshot) {
+  for (const key of ["reach", "engagements", "reactions", "comments", "shares", "linkClicks", "videoViews"]) {
+    const startValue = startSnapshot ? startSnapshot[key] : 0;
+    totals[key] += Math.max(0, endSnapshot[key] - startValue);
+  }
 }
 
 function summarizePostsForWeek(posts, endDate, boundaryMode = "exclude-boundaries") {
@@ -901,6 +1146,7 @@ module.exports = {
   HEADER_ROW,
   CONTENT_PERFORMANCE_HEADER_ROW,
   AD_BOOST_HEADER_ROW,
+  METRIC_SNAPSHOT_HEADER_ROW,
   buildWeeklySectionUpdates,
   buildContentPerformanceFormula,
   buildAdBoostFormula,
@@ -908,5 +1154,6 @@ module.exports = {
   buildAdBoostRows,
   postToRow,
   quoteSheetName,
-  summarizePostsForWeek
+  summarizePostsForWeek,
+  summarizeSnapshotsForWeek
 };

@@ -16,10 +16,12 @@ async function runSync(config = getConfig(), options = {}) {
   const contentRules = config.contentRules;
   const removedLegacyRuleSheet = await sheets.removeLegacyContentRulesSheet();
 
-  const rawPosts = await meta.fetchRecentPosts({
+  const existingPosts = await sheets.readPostLevelObjects();
+  const rawRecentPosts = await meta.fetchRecentPosts({
     startDate: syncWindow.startDate,
     endDate: syncWindow.endDate
   });
+  const rawPosts = await refreshKnownPosts(meta, rawRecentPosts, existingPosts);
   let adSync = { configured: false, adRows: 0, mappedPosts: 0 };
   let hydratedPosts = rawPosts;
   if (config.meta.fetchAds) {
@@ -33,6 +35,7 @@ async function runSync(config = getConfig(), options = {}) {
 
   const processedPosts = hydratedPosts.map((post) => processPost(post, contentRules));
   const upsertResult = await sheets.upsertPosts(processedPosts, contentRules);
+  const snapshotResult = await sheets.recordPostMetricSnapshot();
 
   let weeklyRollups = [];
   const shouldUpdateWeeklyRollups = options.updateWeeklyRollups !== undefined
@@ -53,10 +56,12 @@ async function runSync(config = getConfig(), options = {}) {
     syncWindow: syncWindow.label,
     startDate: formatDateOnly(syncWindow.startDate),
     endDate: formatDateOnly(syncWindow.endDate),
-    fetchedPosts: rawPosts.length,
+    fetchedPosts: rawRecentPosts.length,
+    refreshedKnownPosts: rawPosts.length - rawRecentPosts.length,
     insertedRows: upsertResult.insertedRows,
     updatedRows: upsertResult.updatedRows,
     totalRowsTouched: upsertResult.totalRowsTouched,
+    metricSnapshot: snapshotResult,
     contentRules: contentRules.length,
     removedLegacyRuleSheet,
     adSync: {
@@ -68,6 +73,20 @@ async function runSync(config = getConfig(), options = {}) {
     analyticsTabs,
     syncedAt: new Date().toISOString()
   };
+}
+
+async function refreshKnownPosts(meta, rawRecentPosts, existingPosts) {
+  const recentById = new Map(rawRecentPosts.map((post) => [post.id, post]));
+  const knownIds = existingPosts
+    .map((post) => post["Post ID"])
+    .filter((postId) => postId && !recentById.has(postId));
+
+  if (!knownIds.length) {
+    return rawRecentPosts;
+  }
+
+  const knownPosts = await meta.fetchPostsByIds(knownIds);
+  return [...rawRecentPosts, ...knownPosts];
 }
 
 async function refreshDashboard(config = getConfig()) {

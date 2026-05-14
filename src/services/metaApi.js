@@ -48,6 +48,28 @@ class MetaApiClient {
     return hydrated;
   }
 
+  async fetchPostById(postId) {
+    const post = await this.getJson(this.buildUrl(`/${postId}`, {
+      fields: POST_FIELDS
+    }));
+    const insights = await this.fetchPostInsights(post.id);
+    return normalizePost(post, insights);
+  }
+
+  async fetchPostsByIds(postIds) {
+    const posts = [];
+
+    for (const postId of postIds) {
+      try {
+        posts.push(await this.fetchPostById(postId));
+      } catch (error) {
+        console.warn(`[meta] Could not refresh known post ${postId}: ${error.message}`);
+      }
+    }
+
+    return posts;
+  }
+
   async fetchPostInsights(postId) {
     const url = this.buildUrl(`/${postId}/insights`, {
       metric: INSIGHT_METRICS,

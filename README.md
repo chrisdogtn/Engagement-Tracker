@@ -12,6 +12,7 @@ A modular Node.js automation bridge that pulls Facebook Page post metrics from t
 - Uses app-level content rules from `config/content-rules.default.json` or `CONTENT_RULES_FILE`.
 - Applies a dropdown to the Post-Level `Content Type` column.
 - Updates weekly rollup tabs such as `Q2 Socials`, `Q3 Socials`, and `Q4 Socials`.
+- Stores hidden post metric snapshots so weekly dashboards can use week-over-week changes instead of lifetime totals.
 - Maintains downstream analytics tabs with live formulas that reference `Post-Level Tracking`.
 - Calculates:
   - `Total Engagements = Reactions + Comments + Shares`
@@ -395,6 +396,15 @@ You can change the boundary behavior in `.env`:
 # include-boundaries, exclude-start, exclude-end, or exclude-boundaries
 WEEKLY_ROLLUP_BOUNDARY_MODE=exclude-boundaries
 ```
+
+Weekly rollups now default to snapshot deltas:
+
+```bash
+WEEKLY_ROLLUP_SOURCE=snapshots
+METRIC_SNAPSHOT_SHEET_NAME=Post Metric Snapshots
+```
+
+The snapshot sheet is hidden automatically. Each sync refreshes known post metrics, stores the current counts, and the weekly dashboard calculates activity as `week end snapshot - week start snapshot`. This fixes the old lifetime-metric problem going forward. Historical weeks before the first snapshot cannot be reconstructed perfectly from Meta's current lifetime-only post counts, so keep already hand-keyed historical values if those are the source of truth.
 
 Set the year used for `M/D` dashboard dates:
 
