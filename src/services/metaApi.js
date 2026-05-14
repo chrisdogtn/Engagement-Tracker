@@ -80,6 +80,71 @@ class MetaApiClient {
     return response.data || [];
   }
 
+  async fetchWeeklyFollowerMetrics({ startDate, endDate }) {
+    const summary = await this.fetchPageSummary().catch((error) => ({
+      error: error.message
+    }));
+    const insight = await this.fetchFollowerSnapshotInsight({ startDate, endDate }).catch((error) => ({
+      error: error.message
+    }));
+    const followersEnd = firstNumber(insight.followersEnd, summary.followers_count, summary.fan_count);
+    const followersStart = firstNumber(insight.followersStart);
+
+    return {
+      configured: Boolean(this.pageId && this.pageAccessToken),
+      metric: insight.metric || "",
+      followerGrowth: "",
+      followersStart,
+      followersEnd,
+      pageName: summary.name || "",
+      source: insight.metric
+        ? `Meta Page Insights: ${insight.metric} count snapshot; weekly follower growth not filled`
+        : summary.error || insight.error || "Meta follower metric unavailable",
+      error: insight.error || summary.error || ""
+    };
+  }
+
+  async fetchPageSummary() {
+    const fieldSets = [
+      "id,name,followers_count,fan_count",
+      "id,name,fan_count",
+      "id,name"
+    ];
+
+    let lastError = null;
+    for (const fields of fieldSets) {
+      try {
+        return await this.getJson(this.buildUrl(`/${this.pageId}`, { fields }));
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError;
+  }
+
+  async fetchFollowerSnapshotInsight({ startDate, endDate }) {
+    const metric = "page_follows";
+    const url = this.buildUrl(`/${this.pageId}/insights`, {
+      metric,
+      period: "day",
+      since: formatDate(startDate),
+      until: formatDate(endDate)
+    });
+    const response = await this.getJson(url);
+    const item = response.data && response.data[0] ? response.data[0] : null;
+    const values = item && Array.isArray(item.values) ? item.values : [];
+    if (!values.length) {
+      return { metric, followersStart: "", followersEnd: "" };
+    }
+
+    return {
+      metric,
+      followersStart: numericInsightValue(values[0].value),
+      followersEnd: numericInsightValue(values[values.length - 1].value)
+    };
+  }
+
   buildUrl(path, params = {}) {
     const url = new URL(`${META_BASE_URL}/${this.graphVersion}${path}`);
     url.searchParams.set("access_token", this.pageAccessToken);
@@ -109,6 +174,13 @@ class MetaApiClient {
 
     return body;
   }
+}
+
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function normalizePost(post, insights) {
@@ -147,6 +219,14 @@ function nestedSummaryCount(edge) {
 function numericInsightValue(value) {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function firstNumber(...values) {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return "";
 }
 
 function linkClickCount(value) {

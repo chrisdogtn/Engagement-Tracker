@@ -91,6 +91,8 @@ PORT=3000
 NODE_ENV=production
 WEBHOOK_SECRET=your-long-random-secret
 IMPORT_META_EXPORT_REQUIRE_SECRET=false
+ENABLE_API_SYNC=false
+ENABLE_CRON=false
 
 META_GRAPH_VERSION=v24.0
 META_PAGE_ID=your-page-id
@@ -113,6 +115,7 @@ WEEKLY_ROLLUP_BOUNDARY_MODE=exclude-boundaries
 WEEKLY_ROLLUP_SOURCE=snapshots
 METRIC_SNAPSHOT_SHEET_NAME=Post Metric Snapshots
 IMPORTED_CONTENT_SHEET_NAME=Imported Content Metrics
+WEEKLY_SUMMARY_SHEET_NAME=Weekly Metrics Summary
 DASHBOARD_YEAR=2026
 UPDATE_ANALYTICS_TABS=true
 CONTENT_PERFORMANCE_SHEET_NAME=Content Performance Breakdown
@@ -196,7 +199,9 @@ Open the manual Meta export importer in your browser:
 https://your-public-url/import-meta-export
 ```
 
-Upload the Meta Business Suite **Lifetime** content export CSV. The app writes rows to `Imported Content Metrics`, then refreshes the Q-sheet rollups and analytics tabs. Imported weekly rows are preferred over API/snapshot fallback data for matching week-ending dates.
+Upload the Meta Business Suite **Lifetime** content export CSV. The app writes post rows to `Imported Content Metrics`, writes one weekly row to `Weekly Metrics Summary`, then refreshes the Q-sheet rollups and analytics tabs. Imported weekly rows are preferred over legacy API/snapshot fallback data for matching week-ending dates.
+
+If Meta Business Suite gives you a weekly follower number, enter it in the upload form's `Follower Growth / Weekly Actual` field. The CSV does not include that number.
 
 The import page is public by default. Set `IMPORT_META_EXPORT_REQUIRE_SECRET=true` if you want it to require `WEBHOOK_SECRET`.
 
@@ -264,7 +269,7 @@ const ENGAGEMENT_TRACKER_WEBHOOK_URL = "https://your-public-url/sync-socials";
 const ENGAGEMENT_TRACKER_WEBHOOK_SECRET = "same-value-as-WEBHOOK_SECRET";
 ```
 
-Then run `Sync Now`.
+Then run `Refresh Dashboard`. `Sync Now` is legacy and only works if `ENABLE_API_SYNC=true`.
 
 To make Q1/Q2/Q3/Q4 date edits refresh automatically:
 

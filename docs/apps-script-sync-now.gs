@@ -1,11 +1,11 @@
 const ENGAGEMENT_TRACKER_WEBHOOK_URL =
   "https://YOUR_HOST_OR_NGROK_URL/sync-socials";
-const ENGAGEMENT_TRACKER_WEBHOOK_SECRET = "69696969";
+const ENGAGEMENT_TRACKER_WEBHOOK_SECRET = "replace-with-the-same-secret-from-env";
 
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Engagement Tracker")
-    .addItem("Sync Now", "syncSocialsNow")
+    .addItem("Legacy API Sync", "syncSocialsNow")
     .addItem("Refresh Dashboard", "refreshEngagementDashboard")
     .addItem("Install Date Auto-Refresh", "installDashboardEditTrigger")
     .addToUi();

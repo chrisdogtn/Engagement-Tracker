@@ -32,6 +32,8 @@ function getConfig({ requireSecrets = true } = {}) {
     port: numberFromEnv("PORT", 3000),
     nodeEnv: process.env.NODE_ENV || "development",
     webhookSecret: process.env.WEBHOOK_SECRET || "",
+    enableApiSync: booleanFromEnv("ENABLE_API_SYNC", false),
+    enableCron: booleanFromEnv("ENABLE_CRON", false),
     importMetaExportRequireSecret: booleanFromEnv("IMPORT_META_EXPORT_REQUIRE_SECRET", false),
     meta: {
       graphVersion: process.env.META_GRAPH_VERSION || "v24.0",
@@ -40,6 +42,8 @@ function getConfig({ requireSecrets = true } = {}) {
       adAccountId: normalizeAdAccountId(process.env.META_AD_ACCOUNT_ID || ""),
       adAccessToken: process.env.META_AD_ACCESS_TOKEN || "",
       fetchAds: booleanFromEnv("META_FETCH_ADS", false),
+      supplementFollowersOnImport: booleanFromEnv("META_SUPPLEMENT_FOLLOWERS_ON_IMPORT", true),
+      supplementAdsOnImport: booleanFromEnv("META_SUPPLEMENT_ADS_ON_IMPORT", booleanFromEnv("META_FETCH_ADS", false)),
       lookbackDays: numberFromEnv("LOOKBACK_DAYS", 14)
     },
     google: {
@@ -56,6 +60,7 @@ function getConfig({ requireSecrets = true } = {}) {
       adBoostSheetName: process.env.AD_BOOST_SHEET_NAME || "Ad + Boost Tracking",
       metricSnapshotSheetName: process.env.METRIC_SNAPSHOT_SHEET_NAME || "Post Metric Snapshots",
       importedContentSheetName: process.env.IMPORTED_CONTENT_SHEET_NAME || "Imported Content Metrics",
+      weeklySummarySheetName: process.env.WEEKLY_SUMMARY_SHEET_NAME || "Weekly Metrics Summary",
       applicationCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS || "",
       serviceAccountJson: parseServiceAccountJson(
         process.env.GOOGLE_SERVICE_ACCOUNT_JSON || decodeBase64Env("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
@@ -71,8 +76,16 @@ function getConfig({ requireSecrets = true } = {}) {
   };
 
   if (requireSecrets) {
-    requireConfig(config.meta.pageId, "META_PAGE_ID");
-    requireConfig(config.meta.pageAccessToken, "META_PAGE_ACCESS_TOKEN");
+    if (config.enableApiSync || config.meta.supplementFollowersOnImport) {
+      requireConfig(config.meta.pageId, "META_PAGE_ID");
+      requireConfig(config.meta.pageAccessToken, "META_PAGE_ACCESS_TOKEN");
+    }
+
+    if (config.meta.supplementAdsOnImport && config.meta.fetchAds) {
+      requireConfig(config.meta.adAccountId, "META_AD_ACCOUNT_ID");
+      requireConfig(config.meta.adAccessToken || config.meta.pageAccessToken, "META_AD_ACCESS_TOKEN or META_PAGE_ACCESS_TOKEN");
+    }
+
     requireConfig(config.google.spreadsheetId, "GOOGLE_SPREADSHEET_ID");
 
     if (

@@ -4,7 +4,7 @@ const { applyAdSpendToPosts, MetaAdsApiClient } = require("./services/metaAdsApi
 const { MetaApiClient } = require("./services/metaApi");
 const { parseMetaExportFile } = require("./services/metaExportImporter");
 const { GoogleSheetsClient } = require("./services/googleSheets");
-const { formatDateOnly, resolveSyncWindow } = require("./utils/dateRange");
+const { formatDateOnly, parseDateInput, resolveSyncWindow } = require("./utils/dateRange");
 
 async function runSync(config = getConfig(), options = {}) {
   const meta = new MetaApiClient(config.meta);
@@ -110,6 +110,9 @@ async function importMetaExport(config = getConfig(), {
   sourceFileName,
   weekStart,
   weekEnd,
+  followerGrowth,
+  followersStart,
+  followersEnd,
   updateWeeklyRollups = true,
   updateAnalyticsTabs = true
 } = {}) {
@@ -124,7 +127,11 @@ async function importMetaExport(config = getConfig(), {
     weekStart,
     weekEnd
   });
+  const supplemental = await fetchImportSupplementalMetrics(config, importResult);
+  applyFollowerOverrides(supplemental.followers, { followerGrowth, followersStart, followersEnd });
+  applyImportAdSupplement(importResult, supplemental.adSync.spendByPostId, config.meta.pageId);
   const sheetImport = await sheets.upsertImportedContentMetrics(importResult);
+  const weeklySummary = await sheets.upsertWeeklyMetricsSummary(importResult, supplemental);
 
   const weeklyRollups = updateWeeklyRollups
     ? await sheets.updateWeeklyRollupSheets()
@@ -136,10 +143,145 @@ async function importMetaExport(config = getConfig(), {
   return {
     ok: true,
     import: sheetImport,
+    weeklySummary,
+    supplemental: {
+      followers: withoutSpendMap(supplemental.followers),
+      adSync: withoutSpendMap(supplemental.adSync)
+    },
     weeklyRollups,
     analyticsTabs,
     importedAt: new Date().toISOString()
   };
+}
+
+function applyFollowerOverrides(followers, overrides = {}) {
+  const manualGrowth = numberOrBlank(overrides.followerGrowth);
+  const manualStart = numberOrBlank(overrides.followersStart);
+  const manualEnd = numberOrBlank(overrides.followersEnd);
+  const hasManualValue = manualGrowth !== "" || manualStart !== "" || manualEnd !== "";
+  if (!hasManualValue) return;
+
+  if (manualGrowth !== "") followers.followerGrowth = manualGrowth;
+  if (manualStart !== "") followers.followersStart = manualStart;
+  if (manualEnd !== "") followers.followersEnd = manualEnd;
+  followers.source = "Manual upload field";
+}
+
+async function fetchImportSupplementalMetrics(config, importResult) {
+  const startDate = parseDateInput(importResult.weekStart);
+  const endDate = parseDateInput(importResult.weekEnd);
+  const supplemental = {
+    followers: {
+      configured: false,
+      followerGrowth: "",
+      followersStart: "",
+      followersEnd: "",
+      source: "Not configured"
+    },
+    adSync: {
+      configured: false,
+      adRows: 0,
+      mappedPosts: 0,
+      spendByPostId: new Map()
+    }
+  };
+
+  if (config.meta.supplementFollowersOnImport && config.meta.pageId && config.meta.pageAccessToken) {
+    const meta = new MetaApiClient(config.meta);
+    supplemental.followers = await meta.fetchWeeklyFollowerMetrics({ startDate, endDate }).catch((error) => ({
+      configured: true,
+      followerGrowth: "",
+      followersStart: "",
+      followersEnd: "",
+      source: "Meta follower metric unavailable",
+      error: error.message
+    }));
+  }
+
+  if (config.meta.supplementAdsOnImport) {
+    const ads = new MetaAdsApiClient(config.meta);
+    supplemental.adSync = await ads.fetchAdSpendByPost({ startDate, endDate }).catch((error) => ({
+      configured: ads.isConfigured(),
+      adRows: 0,
+      mappedPosts: 0,
+      spendByPostId: new Map(),
+      error: error.message
+    }));
+  }
+
+  return supplemental;
+}
+
+function applyImportAdSupplement(importResult, spendByPostId, pageId) {
+  if (!spendByPostId || !spendByPostId.size) return;
+
+  for (const row of importResult.rows) {
+    const paid = findPaidMatch(row.postId, spendByPostId, pageId);
+    if (!paid) continue;
+
+    row.adSpend = paid.adSpend;
+    row.adLeads = paid.adLeads;
+    row.paidReach = paid.paidReach;
+    row.paidClicks = paid.paidClicks;
+    row.adIds = paid.adIds || [];
+    row.boosted = "Yes";
+  }
+
+  importResult.totals = summarizeImportTotalsWithAds(importResult);
+}
+
+function findPaidMatch(postId, spendByPostId, pageId) {
+  const rawPostId = String(postId || "").trim();
+  if (!rawPostId) return null;
+
+  const candidates = new Set([
+    rawPostId,
+    pageId ? `${pageId}_${rawPostId}` : ""
+  ].filter(Boolean));
+
+  for (const candidate of candidates) {
+    const exact = spendByPostId.get(candidate);
+    if (exact) return exact;
+  }
+
+  for (const [storyId, paid] of spendByPostId.entries()) {
+    const normalizedStoryId = String(storyId || "").trim();
+    if (
+      normalizedStoryId.endsWith(`_${rawPostId}`) ||
+      rawPostId.endsWith(`_${normalizedStoryId}`)
+    ) {
+      return paid;
+    }
+  }
+
+  return null;
+}
+
+function summarizeImportTotalsWithAds(importResult) {
+  const totals = { ...importResult.totals };
+  totals.adSpend = importResult.rows.reduce((sum, row) => sum + toNumber(row.adSpend), 0);
+  totals.adLeads = importResult.rows.reduce((sum, row) => sum + toNumber(row.adLeads), 0);
+  totals.paidReach = importResult.rows.reduce((sum, row) => sum + toNumber(row.paidReach), 0);
+  totals.paidClicks = importResult.rows.reduce((sum, row) => sum + toNumber(row.paidClicks), 0);
+  return totals;
+}
+
+function withoutSpendMap(value) {
+  if (!value || typeof value !== "object") return value;
+  const copy = { ...value };
+  delete copy.spendByPostId;
+  return copy;
+}
+
+function toNumber(value) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function numberOrBlank(value) {
+  if (value === undefined || value === null || value === "") return "";
+  const parsed = Number(String(value).replace(/[$,%\s,]/g, ""));
+  return Number.isFinite(parsed) ? parsed : "";
 }
 
 module.exports = {
