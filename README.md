@@ -158,16 +158,15 @@ Notes:
 - If the app is used only by people with roles on the app/Page, App Review may not be needed for local/admin usage. For production or broader users, submit the permissions for Meta App Review.
 - `read_insights` is needed for post insight metrics such as reach and click breakdowns.
 
-### Easier Page Token Helper
+### Easier Persistent Page Token Helper
 
-Meta still requires a human login/consent step to get the first short-lived User token. After that, this app can automate the exchange and `.env` update.
+Meta still requires a human login/consent step. The helper can now perform that login locally, exchange the returned OAuth code immediately, save `META_LONG_LIVED_USER_TOKEN`, and then save the Page token into the existing `.env`.
 
 Add these to `.env`:
 
 ```bash
 META_APP_ID=your-meta-app-id
 META_APP_SECRET=your-meta-app-secret
-META_SHORT_LIVED_USER_TOKEN=paste-short-lived-user-token-here
 ```
 
 Then run:
@@ -176,19 +175,33 @@ Then run:
 npm run token:page
 ```
 
+The command opens Facebook Login in your browser. If Meta rejects the callback, add this exact URL in the Meta app under Facebook Login > Settings > Valid OAuth Redirect URIs:
+
+```text
+http://localhost:3456/auth/meta/callback
+```
+
 Or pass values directly:
 
 ```bash
 npm run token:page -- --shortToken=PASTE_TOKEN --pageId=YOUR_PAGE_ID
 ```
 
+Force a fresh browser login even if `.env` already has a long-lived token:
+
+```bash
+npm run token:page -- --forceLogin=true
+```
+
 The helper will:
 
-1. Exchange the short-lived User token for a long-lived User token.
-2. Call `/me/accounts` to find your managed Pages.
-3. Write the matching Page token into `META_PAGE_ACCESS_TOKEN` in your existing `.env`.
+1. Open Facebook Login and request Page/insights permissions, unless a usable token already exists.
+2. Exchange the OAuth code for a short-lived User token.
+3. Exchange that token for a long-lived User token.
+4. Search `/me/accounts`, Business Portfolio `owned_pages`, and Business Portfolio `client_pages`.
+5. Write `META_LONG_LIVED_USER_TOKEN`, `META_PAGE_ID`, and `META_PAGE_ACCESS_TOKEN` into your existing `.env`.
 
-Important: this is not a refresh-token system. If Meta invalidates the token because the user changes password, loses Page access, removes the app, or Meta requires reauthorization, you will need to generate a new short-lived User token and run the helper again.
+Important: this is not a true refresh-token system. Meta does not issue a standard permanent refresh token for this flow. Page tokens often show no fixed expiration, but Meta can still invalidate them if the user changes password, loses Page access, removes the app, changes Business asset permissions, or Meta requires reauthorization.
 
 ## Google Cloud Service Account Setup
 
