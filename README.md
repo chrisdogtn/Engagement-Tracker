@@ -11,9 +11,11 @@ A modular Node.js automation bridge that pulls Facebook Page post metrics from t
 - Upserts rows by `Post ID`, so repeated syncs update existing posts instead of duplicating them.
 - Uses app-level content rules from `config/content-rules.default.json` or `CONTENT_RULES_FILE`.
 - Applies a dropdown to the Post-Level `Content Type` column.
+- Applies a native filter to `Post-Level Tracking` so you can filter by date, content type, boosted status, and metrics directly.
+- Imports weekly Meta Business Suite Lifetime content exports into `Imported Content Metrics`.
 - Updates weekly rollup tabs such as `Q2 Socials`, `Q3 Socials`, and `Q4 Socials`.
 - Stores hidden post metric snapshots so weekly dashboards can use week-over-week changes instead of lifetime totals.
-- Maintains downstream analytics tabs with live formulas that reference `Post-Level Tracking`.
+- Maintains downstream analytics tabs with live formulas and optional start/end date controls.
 - Calculates:
   - `Total Engagements = Reactions + Comments + Shares`
   - `Engagement Rate = Total Engagements / Reach`
@@ -24,9 +26,11 @@ A modular Node.js automation bridge that pulls Facebook Page post metrics from t
 
 ```text
 src/
+  cli/import-meta-export.js    # Manual Meta Business Suite CSV import
   cli/sync-now.js              # Manual command-line sync
   logic/contentParser.js       # Auto-tagging and calculations
   services/googleSheets.js     # Google Sheets API append handler
+  services/metaExportImporter.js # Meta Business Suite CSV parser
   services/metaApi.js          # Meta Graph API post/insight fetcher
   utils/dateRange.js           # Date range parsing
   config.js                    # Environment loading and validation
@@ -56,6 +60,7 @@ META_PAGE_ACCESS_TOKEN=your-long-lived-page-access-token
 GOOGLE_SPREADSHEET_ID=your-google-sheet-id
 GOOGLE_APPLICATION_CREDENTIALS=./service-account.json
 WEBHOOK_SECRET=replace-with-a-long-random-secret
+IMPORT_META_EXPORT_REQUIRE_SECRET=false
 ```
 
 4. In your Google Sheet, create a tab named:
@@ -106,6 +111,18 @@ curl -X POST http://localhost:3000/sync-socials \
 
 If no range or `lookbackDays` is supplied, the app syncs the current week from Sunday through the current day. To force an older rolling-window sync, pass `lookbackDays` in the webhook payload.
 
+Import a Meta Business Suite Lifetime content export:
+
+```bash
+node src/cli/import-meta-export.js --file="C:\Users\Chris\Downloads\May-04-2026_May-10-2026_1299243185022610.csv"
+```
+
+The importer usually infers `weekStart` and `weekEnd` from Meta's exported file name. If needed, pass them explicitly:
+
+```bash
+node src/cli/import-meta-export.js --file="C:\path\to\export.csv" --weekStart=5/4/2026 --weekEnd=5/10/2026
+```
+
 Refresh dashboard/rollup tabs without pulling Meta:
 
 ```bash
@@ -114,6 +131,16 @@ curl -X POST http://localhost:3000/refresh-dashboard \
   -H "x-sync-secret: replace-with-the-same-secret-from-env" \
   -d "{\"source\":\"manual-test\"}"
 ```
+
+Open the upload page for drag-and-drop/manual import:
+
+```text
+https://your-public-url/import-meta-export
+```
+
+Upload the Meta Business Suite **Lifetime** CSV. The page imports the file, updates `Imported Content Metrics`, and refreshes the dashboard tabs.
+
+By default, the import page is public and does not require the webhook secret. Set `IMPORT_META_EXPORT_REQUIRE_SECRET=true` if you want the upload form to require `WEBHOOK_SECRET`.
 
 ## Meta Graph API Token Setup
 
@@ -258,6 +285,40 @@ For Q1/Q2/Q3/Q4 dashboard auto-refresh:
 4. Approve permissions.
 
 After that, entering a date in column `A` on `Q1 Socials`, `Q2 Socials`, `Q3 Socials`, or `Q4 Socials` calls `/refresh-dashboard` and fills the matching weekly sections from `Post-Level Tracking`.
+
+## Filtering Reports by Week or Date Range
+
+`Post-Level Tracking` stays the source of truth. The app adds a native Google Sheets filter to this tab, so you can use the sheet filter controls to narrow raw rows by date, content type, boosted status, reach, engagements, and other columns.
+
+The generated analytics tabs also include editable date controls:
+
+- `Content Performance Breakdown`
+- `Ad + Boost Tracking`
+
+On either tab:
+
+1. Put a date in `B2` for `Start Date`.
+2. Put a date in `B3` for `End Date`.
+3. Leave either date blank to make that side of the range open-ended.
+4. Leave both dates blank to show all available rows.
+
+The table below the controls recalculates automatically from imported weekly metrics. For a specific week, enter the Monday/Sunday range you want to analyze, such as `5/4/2026` through `5/10/2026`.
+
+The Q1/Q2/Q3/Q4 Socials tabs still work as week-ending dashboards. A row date like `5/10` represents the week ending on `5/10`.
+
+When `Imported Content Metrics` has rows for a week-ending date, the Q-sheet weekly rollups use those imported export totals first. If no import exists for that week, the app falls back to snapshots/Post-Level data.
+
+### Weekly Meta Export Workflow
+
+Every Monday:
+
+1. In Meta Business Suite, export Content data for the prior Monday-Sunday reporting week.
+2. Choose **Lifetime** export, not Daily.
+3. Turn on the columns for Views, Reach, Reactions, Comments, Shares, Total Clicks, organic/boosted breakdowns, and video metrics.
+4. Upload the CSV at `/import-meta-export`, or run the CLI import command.
+5. Confirm `Imported Content Metrics` has one row per post for that week.
+
+The imported weekly rows become the locked reporting source for that week. Re-importing the same week updates the existing rows instead of creating duplicates.
 
 The edited date cell gets a note with the refresh status. If no note appears, the Apps Script edit trigger did not run.
 

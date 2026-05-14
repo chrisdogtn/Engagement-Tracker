@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const { google } = require("googleapis");
 const { normalizeRules } = require("../logic/contentParser");
-const { parseDateInput, startOfDay, endOfDay } = require("../utils/dateRange");
+const { formatDateOnly, parseDateInput, startOfDay, endOfDay } = require("../utils/dateRange");
 
 const HEADER_ROW = [
   "Synced At",
@@ -66,6 +66,38 @@ const METRIC_SNAPSHOT_HEADER_ROW = [
   "Video Views (3s)"
 ];
 
+const IMPORTED_CONTENT_HEADER_ROW = [
+  "Imported At",
+  "Source File",
+  "Import ID",
+  "Week Start",
+  "Week End",
+  "Post ID",
+  "Publish Time",
+  "Post Title / Description",
+  "Content Type",
+  "Format",
+  "Views",
+  "Reach",
+  "Total Engagements",
+  "Reactions",
+  "Comments",
+  "Shares",
+  "Total Clicks",
+  "3-second Video Views",
+  "1-minute Video Views",
+  "Seconds Viewed",
+  "Avg Seconds Viewed",
+  "Organic Views",
+  "Boosted Views",
+  "Organic Reach",
+  "Boosted Reach",
+  "Boosted?",
+  "Engagement Rate",
+  "Estimated Lead Value",
+  "Permalink"
+];
+
 class GoogleSheetsClient {
   constructor({
     spreadsheetId,
@@ -77,6 +109,7 @@ class GoogleSheetsClient {
     contentPerformanceSheetName,
     adBoostSheetName,
     metricSnapshotSheetName,
+    importedContentSheetName,
     weeklyRollupSource,
     applicationCredentials,
     serviceAccountJson,
@@ -92,6 +125,7 @@ class GoogleSheetsClient {
     this.contentPerformanceSheetName = contentPerformanceSheetName || "Content Performance Breakdown";
     this.adBoostSheetName = adBoostSheetName || "Ad + Boost Tracking";
     this.metricSnapshotSheetName = metricSnapshotSheetName || "Post Metric Snapshots";
+    this.importedContentSheetName = importedContentSheetName || "Imported Content Metrics";
     this.weeklyRollupSource = weeklyRollupSource || "snapshots";
     this.auth = buildAuth({ applicationCredentials, serviceAccountJson, clientEmail, privateKey });
     this.sheets = google.sheets({ version: "v4", auth: this.auth });
@@ -266,8 +300,120 @@ class GoogleSheetsClient {
     return rows.map((row) => rowToObject(METRIC_SNAPSHOT_HEADER_ROW, row));
   }
 
+  async ensureImportedContentSheet() {
+    const sheet = await this.ensureSheetExists(this.importedContentSheetName);
+    const range = `${quoteSheetName(this.importedContentSheetName)}!A1:${columnToLetter(IMPORTED_CONTENT_HEADER_ROW.length)}1`;
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range
+    });
+    const existing = response.data.values && response.data.values[0] ? response.data.values[0] : [];
+
+    if (!arraysEqual(existing, IMPORTED_CONTENT_HEADER_ROW)) {
+      await this.sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range,
+        valueInputOption: "RAW",
+        requestBody: {
+          values: [IMPORTED_CONTENT_HEADER_ROW]
+        }
+      });
+    }
+
+    await this.formatImportedContentSheet(sheet.properties.sheetId);
+  }
+
+  async upsertImportedContentMetrics(importResult) {
+    await this.ensureImportedContentSheet();
+
+    const existingRows = await this.readImportedContentRows();
+    const existingByKey = new Map();
+    existingRows.forEach((row, index) => {
+      const object = rowToObject(IMPORTED_CONTENT_HEADER_ROW, row);
+      const key = importedMetricKey(object);
+      if (key) existingByKey.set(key, index + 2);
+      const permalinkKey = importedMetricPermalinkKey(object);
+      if (permalinkKey) existingByKey.set(permalinkKey, index + 2);
+    });
+
+    const updates = [];
+    const inserts = [];
+
+    for (const metric of importResult.rows) {
+      const row = importedMetricToRow(metric);
+      const key = importedMetricKey({
+        "Week End": metric.weekEnd,
+        "Post ID": metric.postId
+      });
+      const permalinkKey = importedMetricPermalinkKey({
+        "Week End": metric.weekEnd,
+        Permalink: metric.permalink
+      });
+      const existingRowNumber = existingByKey.get(key) || existingByKey.get(permalinkKey);
+
+      if (existingRowNumber) {
+        updates.push({
+          range: `${quoteSheetName(this.importedContentSheetName)}!A${existingRowNumber}:${columnToLetter(IMPORTED_CONTENT_HEADER_ROW.length)}${existingRowNumber}`,
+          values: [row]
+        });
+      } else {
+        inserts.push(row);
+      }
+    }
+
+    if (updates.length) {
+      await this.sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: updates
+        }
+      });
+    }
+
+    if (inserts.length) {
+      await this.sheets.spreadsheets.values.append({
+        spreadsheetId: this.spreadsheetId,
+        range: `${quoteSheetName(this.importedContentSheetName)}!A:${columnToLetter(IMPORTED_CONTENT_HEADER_ROW.length)}`,
+        valueInputOption: "RAW",
+        insertDataOption: "INSERT_ROWS",
+        requestBody: {
+          values: inserts
+        }
+      });
+    }
+
+    return {
+      sheetName: this.importedContentSheetName,
+      importId: importResult.importId,
+      weekStart: importResult.weekStart,
+      weekEnd: importResult.weekEnd,
+      insertedRows: inserts.length,
+      updatedRows: updates.length,
+      totalRowsTouched: inserts.length + updates.length,
+      totals: importResult.totals
+    };
+  }
+
+  async readImportedContentObjects() {
+    await this.ensureImportedContentSheet();
+    const rows = await this.readImportedContentRows();
+    return rows.map((row) => rowToObject(IMPORTED_CONTENT_HEADER_ROW, row));
+  }
+
+  async readImportedContentRows() {
+    const range = `${quoteSheetName(this.importedContentSheetName)}!A2:${columnToLetter(IMPORTED_CONTENT_HEADER_ROW.length)}`;
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range
+    });
+
+    return response.data.values || [];
+  }
+
   async updateWeeklyRollupSheets() {
     const posts = await this.readPostLevelObjects();
+    const importedMetrics = await this.readImportedContentObjects();
     const snapshots = this.weeklyRollupSource === "snapshots"
       ? await this.readMetricSnapshots()
       : [];
@@ -275,7 +421,7 @@ class GoogleSheetsClient {
     const results = [];
 
     for (const sheetName of sheetNames) {
-      const result = await this.updateSectionStyleWeeklySheet(sheetName, posts, snapshots);
+      const result = await this.updateSectionStyleWeeklySheet(sheetName, posts, snapshots, importedMetrics);
       results.push(result);
     }
 
@@ -284,7 +430,7 @@ class GoogleSheetsClient {
 
   async updateAnalyticsTabs() {
     const posts = await this.readPostLevelObjects();
-    const performance = await this.updateContentPerformanceBreakdown(posts);
+    const performance = await this.updateContentPerformanceBreakdown();
     const adBoost = await this.updateAdBoostTracking(posts);
 
     return [performance, adBoost];
@@ -313,8 +459,10 @@ class GoogleSheetsClient {
     return true;
   }
 
-  async updateContentPerformanceBreakdown(posts) {
+  async updateContentPerformanceBreakdown() {
+    await this.ensureImportedContentSheet();
     await this.ensureSheetExists(this.contentPerformanceSheetName);
+    const controls = await this.readDateRangeControls(this.contentPerformanceSheetName);
 
     await this.sheets.spreadsheets.values.clear({
       spreadsheetId: this.spreadsheetId,
@@ -326,11 +474,21 @@ class GoogleSheetsClient {
       range: `${quoteSheetName(this.contentPerformanceSheetName)}!A1`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
-        values: [[buildContentPerformanceFormula(this.sheetTabName)]]
+        values: [
+          ["Date Range Filter", "Leave either date blank to include all matching rows."],
+          ["Start Date", controls.startDate],
+          ["End Date", controls.endDate],
+          [],
+          [buildContentPerformanceFormula(this.importedContentSheetName)]
+        ]
       }
     });
 
     await this.formatGeneratedAnalyticsSheet(this.contentPerformanceSheetName, {
+      headerRows: [0, 4],
+      filterStartRow: 4,
+      filterColumnCount: CONTENT_PERFORMANCE_HEADER_ROW.length,
+      numberColumns: [1, 2, 3, 5, 6],
       percentColumns: [4],
       moneyColumns: []
     });
@@ -343,6 +501,7 @@ class GoogleSheetsClient {
 
   async updateAdBoostTracking(posts) {
     await this.ensureSheetExists(this.adBoostSheetName);
+    const controls = await this.readDateRangeControls(this.adBoostSheetName);
 
     await this.sheets.spreadsheets.values.clear({
       spreadsheetId: this.spreadsheetId,
@@ -354,11 +513,20 @@ class GoogleSheetsClient {
       range: `${quoteSheetName(this.adBoostSheetName)}!A1`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
-        values: [[buildAdBoostFormula(this.sheetTabName)]]
+        values: [
+          ["Date Range Filter", "Leave either date blank to include all matching rows."],
+          ["Start Date", controls.startDate],
+          ["End Date", controls.endDate],
+          [],
+          [buildAdBoostFormula(this.sheetTabName)]
+        ]
       }
     });
 
     await this.formatGeneratedAnalyticsSheet(this.adBoostSheetName, {
+      headerRows: [0, 4],
+      filterStartRow: 4,
+      filterColumnCount: AD_BOOST_HEADER_ROW.length,
       percentColumns: [],
       moneyColumns: [4, 7, 9]
     });
@@ -381,7 +549,7 @@ class GoogleSheetsClient {
       .filter((title) => pattern.test(title));
   }
 
-  async updateSectionStyleWeeklySheet(sheetName, posts, snapshots = []) {
+  async updateSectionStyleWeeklySheet(sheetName, posts, snapshots = [], importedMetrics = []) {
     const range = `${quoteSheetName(sheetName)}!A1:L250`;
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
@@ -399,6 +567,7 @@ class GoogleSheetsClient {
       dashboardYear: this.dashboardYear,
       boundaryMode: this.weeklyRollupBoundaryMode,
       snapshots,
+      importedMetrics,
       rollupSource: this.weeklyRollupSource
     });
 
@@ -493,6 +662,14 @@ class GoogleSheetsClient {
       requests.push(formatColumnRequest(sheet.sheetId, moneyIndex, "CURRENCY", "$#,##0.00"));
     }
 
+    requests.push({
+      setBasicFilter: {
+        filter: {
+          range: gridRange(sheet.sheetId, 0, headers.length, 0)
+        }
+      }
+    });
+
     if (requests.length) {
       await this.sheets.spreadsheets.batchUpdate({
         spreadsheetId: this.spreadsheetId,
@@ -503,12 +680,21 @@ class GoogleSheetsClient {
     }
   }
 
-  async formatGeneratedAnalyticsSheet(sheetName, { percentColumns, moneyColumns }) {
+  async formatGeneratedAnalyticsSheet(sheetName, {
+    headerRows = [0],
+    filterStartRow,
+    filterColumnCount,
+    numberColumns = [],
+    percentColumns,
+    moneyColumns
+  }) {
     const sheet = await this.getSheetProperty(sheetName);
-    const requests = [
-      {
+    const requests = [];
+
+    for (const rowIndex of headerRows) {
+      requests.push({
         repeatCell: {
-          range: gridRange(sheet.sheetId, 0, 20, 0, 1),
+          range: gridRange(sheet.sheetId, 0, 20, rowIndex, rowIndex + 1),
           cell: {
             userEnteredFormat: {
               textFormat: {
@@ -518,16 +704,57 @@ class GoogleSheetsClient {
           },
           fields: "userEnteredFormat.textFormat.bold"
         }
-      }
-    ];
+      });
+    }
+
+    requests.push(formatRangeRequest(sheet.sheetId, 1, 2, 1, 3, "DATE", "m/d/yyyy"));
+
+    const dataStartRow = Number.isInteger(filterStartRow) ? filterStartRow + 1 : 1;
+
+    for (const columnIndex of numberColumns) {
+      requests.push(formatColumnRequest(sheet.sheetId, columnIndex, "NUMBER", "#,##0.00", dataStartRow));
+    }
 
     for (const columnIndex of percentColumns) {
-      requests.push(formatColumnRequest(sheet.sheetId, columnIndex, "PERCENT", "0.00%"));
+      requests.push(formatColumnRequest(sheet.sheetId, columnIndex, "PERCENT", "0.00%", dataStartRow));
     }
 
     for (const columnIndex of moneyColumns) {
-      requests.push(formatColumnRequest(sheet.sheetId, columnIndex, "CURRENCY", "$#,##0.00"));
+      requests.push(formatColumnRequest(sheet.sheetId, columnIndex, "CURRENCY", "$#,##0.00", dataStartRow));
     }
+
+    if (Number.isInteger(filterStartRow) && Number.isInteger(filterColumnCount)) {
+      requests.push({
+        setBasicFilter: {
+          filter: {
+            range: gridRange(sheet.sheetId, 0, filterColumnCount, filterStartRow)
+          }
+        }
+      });
+    }
+
+    await this.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: {
+        requests
+      }
+    });
+  }
+
+  async formatImportedContentSheet(sheetId) {
+    const requests = [
+      {
+        setBasicFilter: {
+          filter: {
+            range: gridRange(sheetId, 0, IMPORTED_CONTENT_HEADER_ROW.length, 0)
+          }
+        }
+      },
+      formatColumnRequest(sheetId, 3, "DATE", "m/d/yyyy"),
+      formatColumnRequest(sheetId, 4, "DATE", "m/d/yyyy"),
+      formatColumnRequest(sheetId, 26, "PERCENT", "0.00%"),
+      formatColumnRequest(sheetId, 27, "CURRENCY", "$#,##0.00")
+    ];
 
     await this.sheets.spreadsheets.batchUpdate({
       spreadsheetId: this.spreadsheetId,
@@ -545,6 +772,25 @@ class GoogleSheetsClient {
     });
 
     return response.data.values || [];
+  }
+
+  async readDateRangeControls(sheetName) {
+    const range = `${quoteSheetName(sheetName)}!B2:B3`;
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range
+    }).catch((error) => {
+      if (error && error.code === 400) {
+        return { data: { values: [] } };
+      }
+      throw error;
+    });
+
+    const values = response.data.values || [];
+    return {
+      startDate: sanitizeDateControl(values[0] && values[0][0] ? values[0][0] : "", this.dashboardYear),
+      endDate: sanitizeDateControl(values[1] && values[1][0] ? values[1][0] : "", this.dashboardYear)
+    };
   }
 
   async ensureSheetExists(title) {
@@ -711,6 +957,7 @@ function buildWeeklySectionUpdates(values, posts, {
   dashboardYear,
   boundaryMode = "exclude-boundaries",
   snapshots = [],
+  importedMetrics = [],
   rollupSource = "snapshots"
 }) {
   const updates = [];
@@ -731,12 +978,17 @@ function buildWeeklySectionUpdates(values, posts, {
       return;
     }
 
-    const stats = rollupSource === "snapshots" && snapshots.length
-      ? summarizeSnapshotsForWeek(posts, snapshots, parsedDate, boundaryMode)
-      : summarizePostsForWeek(posts, parsedDate, boundaryMode);
-    if (!stats) return;
+    const importedStats = summarizeImportedForWeek(importedMetrics, parsedDate);
+    const fallbackStats = importedMetrics.length
+      ? null
+      : rollupSource === "snapshots" && snapshots.length
+        ? summarizeSnapshotsForWeek(posts, snapshots, parsedDate, boundaryMode)
+        : summarizePostsForWeek(posts, parsedDate, boundaryMode);
+    const stats = importedStats || fallbackStats;
     const rowNumber = rowIndex + 1;
     const weeklyActualColumn = findColumnIndex(sectionHeader, "weekly actual", 2);
+
+    if (!stats) return;
 
     if (section.includes("total reach")) {
       updates.push(cellUpdate(sheetName, rowNumber, weeklyActualColumn, stats.reach));
@@ -770,6 +1022,90 @@ function metricSnapshotToRow(post, snapshotAt) {
     toNumber(post["Link Clicks"]),
     toNumber(post["Video Views (3s)"])
   ];
+}
+
+function importedMetricToRow(metric) {
+  return [
+    metric.importedAt,
+    metric.sourceFileName,
+    metric.importId,
+    metric.weekStart,
+    metric.weekEnd,
+    metric.postId,
+    metric.publishTime,
+    metric.title,
+    metric.contentType,
+    metric.format,
+    metric.views,
+    metric.reach,
+    metric.totalEngagements,
+    metric.reactions,
+    metric.comments,
+    metric.shares,
+    metric.totalClicks,
+    metric.videoViews3s,
+    metric.videoViews1m,
+    metric.secondsViewed,
+    metric.avgSecondsViewed,
+    metric.organicViews,
+    metric.boostedViews,
+    metric.organicReach,
+    metric.boostedReach,
+    metric.boosted,
+    metric.engagementRate,
+    metric.estimatedLeadValue,
+    metric.permalink
+  ];
+}
+
+function importedMetricKey(metric) {
+  const weekEnd = metric["Week End"] || metric.weekEnd;
+  const postId = metric["Post ID"] || metric.postId;
+  if (!weekEnd || !postId) return "";
+  return `${formatDateKey(weekEnd)}|${postId}`;
+}
+
+function importedMetricPermalinkKey(metric) {
+  const weekEnd = metric["Week End"] || metric.weekEnd;
+  const permalink = metric.Permalink || metric.permalink;
+  if (!weekEnd || !permalink) return "";
+  return `${formatDateKey(weekEnd)}|${String(permalink).trim()}`;
+}
+
+function formatDateKey(value) {
+  const parsed = parsePostDate(value);
+  return parsed ? parsed.toISOString().slice(0, 10) : String(value || "").trim();
+}
+
+function summarizeImportedForWeek(importedMetrics, endDate) {
+  const target = formatDateOnly(endDate);
+  const rows = importedMetrics.filter((metric) => formatDateKey(metric["Week End"]) === target);
+  if (!rows.length) return null;
+
+  const totals = rows.reduce((summary, metric) => {
+    summary.reach += toNumber(metric.Reach);
+    summary.engagements += toNumber(metric["Total Engagements"]);
+    summary.reactions += toNumber(metric.Reactions);
+    summary.comments += toNumber(metric.Comments);
+    summary.shares += toNumber(metric.Shares);
+    summary.linkClicks += toNumber(metric["Total Clicks"]);
+    summary.videoViews += toNumber(metric.Views);
+    summary.videoViews3s += toNumber(metric["3-second Video Views"]);
+    return summary;
+  }, {
+    reach: 0,
+    engagements: 0,
+    reactions: 0,
+    comments: 0,
+    shares: 0,
+    linkClicks: 0,
+    videoViews: 0,
+    videoViews3s: 0,
+    source: "imported"
+  });
+
+  totals.engagementRate = totals.reach ? totals.engagements / totals.reach : 0;
+  return totals;
 }
 
 function summarizeSnapshotsForWeek(posts, snapshots, endDate, boundaryMode = "exclude-boundaries") {
@@ -936,8 +1272,12 @@ function normalizeBoundaryMode(value) {
 }
 
 function buildContentPerformanceFormula(postLevelSheetName) {
-  const source = `${quoteSheetNameForFormula(postLevelSheetName)}!E2:L`;
-  return `=QUERY(${source},"select Col1, count(Col1), avg(Col2), avg(Col3), avg(Col8), sum(Col6), sum(Col5) where Col1 is not null group by Col1 label Col1 'Content Type', count(Col1) '# of Posts', avg(Col2) 'Avg Reach', avg(Col3) 'Avg Engagements', avg(Col8) 'Avg Engagement Rate', sum(Col6) 'Total Shares', sum(Col5) 'Total Comments'",0)`;
+  const source = quoteSheetNameForFormula(postLevelSheetName);
+  const dateSerial = `IFERROR(DATEVALUE(${source}!E2:E),0)`;
+  const filteredRows = `FILTER({${source}!I2:I,${source}!L2:L,${source}!M2:M,${source}!AA2:AA,${source}!P2:P,${source}!O2:O},LEN(${source}!I2:I),IF($B$2="",LEN(${source}!I2:I),${dateSerial}>=$B$2),IF($B$3="",LEN(${source}!I2:I),${dateSerial}<=$B$3))`;
+  const query = `"select Col1, count(Col1), avg(Col2), avg(Col3), avg(Col4), sum(Col5), sum(Col6) group by Col1 label Col1 'Content Type', count(Col1) '# of Posts', avg(Col2) 'Avg Reach', avg(Col3) 'Avg Engagements', avg(Col4) 'Avg Engagement Rate', sum(Col5) 'Total Shares', sum(Col6) 'Total Comments'"`;
+  const emptyTable = `{"Content Type","# of Posts","Avg Reach","Avg Engagements","Avg Engagement Rate","Total Shares","Total Comments";"No matching rows","","","","","",""}`;
+  return `=IFNA(QUERY(${filteredRows},${query},0),${emptyTable})`;
 }
 
 function buildAdBoostFormula(postLevelSheetName) {
@@ -945,8 +1285,10 @@ function buildAdBoostFormula(postLevelSheetName) {
   const headers = `{${AD_BOOST_HEADER_ROW.map((header) => `"${escapeFormulaString(header)}"`).join(",")}}`;
   const blankRow = `{${AD_BOOST_HEADER_ROW.map((header, index) => `"${index === 0 ? "No boosted/ad rows yet" : ""}"`).join(",")}}`;
   const blankColumn = `IF(LEN(${source}!B2:B),"","")`;
+  const dateSerial = `IFERROR(DATEVALUE(LEFT(${source}!C2:C,10)),0)`;
+  const dateFilters = `IF($B$2="",LEN(${source}!C2:C),${dateSerial}>=$B$2),IF($B$3="",LEN(${source}!C2:C),${dateSerial}<=$B$3)`;
 
-  return `=VSTACK(${headers},IFNA(FILTER(HSTACK(${source}!C2:C,${source}!D2:D,IF(${source}!R2:R="Yes","Boosted","Ad"),${blankColumn},${source}!S2:S,${source}!F2:F,${source}!G2:G,IFERROR(${source}!S2:S/${source}!G2:G,),${source}!U2:U,IFERROR(${source}!S2:S/${source}!U2:U,),${source}!T2:T,${source}!B2:B,${source}!N2:N),((${source}!R2:R="Yes")+(${source}!S2:S>0))>0),${blankRow}))`;
+  return `=VSTACK(${headers},IFNA(FILTER(HSTACK(${source}!C2:C,${source}!D2:D,IF(${source}!R2:R="Yes","Boosted","Ad"),${blankColumn},${source}!S2:S,${source}!F2:F,${source}!G2:G,IFERROR(${source}!S2:S/${source}!G2:G,),${source}!U2:U,IFERROR(${source}!S2:S/${source}!U2:U,),${source}!T2:T,${source}!B2:B,${source}!N2:N),((${source}!R2:R="Yes")+(${source}!S2:S>0))>0,${dateFilters}),${blankRow}))`;
 }
 
 function buildContentPerformanceRows(posts) {
@@ -1056,6 +1398,21 @@ function parsePostDate(value) {
   }
 }
 
+function sanitizeDateControl(value, fallbackYear) {
+  if (!value) return "";
+
+  try {
+    const parsed = parseDateInput(value, fallbackYear);
+    const year = parsed.getFullYear();
+    if (year < 2000 || year > 2100) {
+      return "";
+    }
+    return value;
+  } catch {
+    return "";
+  }
+}
+
 function findColumnIndex(row, label, fallback) {
   const normalizedLabel = normalizeLabel(label);
   const index = row.findIndex((cell) => normalizeLabel(cell).includes(normalizedLabel));
@@ -1120,10 +1477,14 @@ function gridRange(sheetId, startColumnIndex, endColumnIndex, startRowIndex, end
   };
 }
 
-function formatColumnRequest(sheetId, columnIndex, type, pattern) {
+function formatColumnRequest(sheetId, columnIndex, type, pattern, startRowIndex = 1, endRowIndex = 1000) {
+  return formatRangeRequest(sheetId, columnIndex, columnIndex + 1, startRowIndex, endRowIndex, type, pattern);
+}
+
+function formatRangeRequest(sheetId, startColumnIndex, endColumnIndex, startRowIndex, endRowIndex, type, pattern) {
   return {
     repeatCell: {
-      range: gridRange(sheetId, columnIndex, columnIndex + 1, 1, 1000),
+      range: gridRange(sheetId, startColumnIndex, endColumnIndex, startRowIndex, endRowIndex),
       cell: {
         userEnteredFormat: {
           numberFormat: {
@@ -1147,6 +1508,7 @@ module.exports = {
   CONTENT_PERFORMANCE_HEADER_ROW,
   AD_BOOST_HEADER_ROW,
   METRIC_SNAPSHOT_HEADER_ROW,
+  IMPORTED_CONTENT_HEADER_ROW,
   buildWeeklySectionUpdates,
   buildContentPerformanceFormula,
   buildAdBoostFormula,
@@ -1155,5 +1517,6 @@ module.exports = {
   postToRow,
   quoteSheetName,
   summarizePostsForWeek,
-  summarizeSnapshotsForWeek
+  summarizeSnapshotsForWeek,
+  summarizeImportedForWeek
 };

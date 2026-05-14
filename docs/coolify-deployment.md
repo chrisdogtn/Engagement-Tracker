@@ -90,6 +90,7 @@ Paste these into Coolify's Environment Variables screen. Use your real values fr
 PORT=3000
 NODE_ENV=production
 WEBHOOK_SECRET=your-long-random-secret
+IMPORT_META_EXPORT_REQUIRE_SECRET=false
 
 META_GRAPH_VERSION=v24.0
 META_PAGE_ID=your-page-id
@@ -111,6 +112,7 @@ WEEKLY_ROLLUP_SHEET_PATTERN=^Q[1-4] Socials$
 WEEKLY_ROLLUP_BOUNDARY_MODE=exclude-boundaries
 WEEKLY_ROLLUP_SOURCE=snapshots
 METRIC_SNAPSHOT_SHEET_NAME=Post Metric Snapshots
+IMPORTED_CONTENT_SHEET_NAME=Imported Content Metrics
 DASHBOARD_YEAR=2026
 UPDATE_ANALYTICS_TABS=true
 CONTENT_PERFORMANCE_SHEET_NAME=Content Performance Breakdown
@@ -188,6 +190,16 @@ curl -X POST https://your-public-url/refresh-dashboard \
   -d "{\"source\":\"manual-test\"}"
 ```
 
+Open the manual Meta export importer in your browser:
+
+```text
+https://your-public-url/import-meta-export
+```
+
+Upload the Meta Business Suite **Lifetime** content export CSV. The app writes rows to `Imported Content Metrics`, then refreshes the Q-sheet rollups and analytics tabs. Imported weekly rows are preferred over API/snapshot fallback data for matching week-ending dates.
+
+The import page is public by default. Set `IMPORT_META_EXPORT_REQUIRE_SECRET=true` if you want it to require `WEBHOOK_SECRET`.
+
 ## 5. Public URL Options For A Local Coolify Install
 
 Google Apps Script must reach your app from Google's servers, so `localhost` and private LAN IPs will not work.
@@ -198,13 +210,13 @@ You need one of these:
 
 If your Coolify machine has a public IP:
 
-1. Point a DNS record such as `engagement.yourdomain.com` to the Coolify server.
-2. Add that domain to the app in Coolify.
+1. Point a DNS record such as `test.yourdomain.com` to the Coolify server, or keep using the existing app domain you already have configured.
+2. Add that same app domain to the app in Coolify.
 3. Let Coolify/Traefik issue HTTPS.
 4. Use:
 
 ```js
-const ENGAGEMENT_TRACKER_WEBHOOK_URL = "https://engagement.yourdomain.com/sync-socials";
+const ENGAGEMENT_TRACKER_WEBHOOK_URL = "https://test.yourdomain.com/sync-socials";
 ```
 
 ### Option B: Cloudflare Tunnel

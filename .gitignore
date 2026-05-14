@@ -3,3 +3,5 @@ dist/
 .env
 service-account.json
 *.log
+imports/
+uploads/

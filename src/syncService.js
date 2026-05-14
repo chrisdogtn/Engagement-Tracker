@@ -2,6 +2,7 @@ const { getConfig } = require("./config");
 const { processPost } = require("./logic/contentParser");
 const { applyAdSpendToPosts, MetaAdsApiClient } = require("./services/metaAdsApi");
 const { MetaApiClient } = require("./services/metaApi");
+const { parseMetaExportFile } = require("./services/metaExportImporter");
 const { GoogleSheetsClient } = require("./services/googleSheets");
 const { formatDateOnly, resolveSyncWindow } = require("./utils/dateRange");
 
@@ -104,7 +105,45 @@ async function refreshDashboard(config = getConfig()) {
   };
 }
 
+async function importMetaExport(config = getConfig(), {
+  filePath,
+  sourceFileName,
+  weekStart,
+  weekEnd,
+  updateWeeklyRollups = true,
+  updateAnalyticsTabs = true
+} = {}) {
+  if (!filePath) {
+    throw new Error("filePath is required for Meta export import.");
+  }
+
+  const sheets = new GoogleSheetsClient(config.google);
+  const importResult = parseMetaExportFile(filePath, {
+    contentRules: config.contentRules,
+    sourceFileName,
+    weekStart,
+    weekEnd
+  });
+  const sheetImport = await sheets.upsertImportedContentMetrics(importResult);
+
+  const weeklyRollups = updateWeeklyRollups
+    ? await sheets.updateWeeklyRollupSheets()
+    : [];
+  const analyticsTabs = updateAnalyticsTabs && config.google.updateAnalyticsTabs
+    ? await sheets.updateAnalyticsTabs()
+    : [];
+
+  return {
+    ok: true,
+    import: sheetImport,
+    weeklyRollups,
+    analyticsTabs,
+    importedAt: new Date().toISOString()
+  };
+}
+
 module.exports = {
+  importMetaExport,
   refreshDashboard,
   runSync
 };

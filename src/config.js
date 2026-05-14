@@ -32,6 +32,7 @@ function getConfig({ requireSecrets = true } = {}) {
     port: numberFromEnv("PORT", 3000),
     nodeEnv: process.env.NODE_ENV || "development",
     webhookSecret: process.env.WEBHOOK_SECRET || "",
+    importMetaExportRequireSecret: booleanFromEnv("IMPORT_META_EXPORT_REQUIRE_SECRET", false),
     meta: {
       graphVersion: process.env.META_GRAPH_VERSION || "v24.0",
       pageId: process.env.META_PAGE_ID || "",
@@ -54,6 +55,7 @@ function getConfig({ requireSecrets = true } = {}) {
       contentPerformanceSheetName: process.env.CONTENT_PERFORMANCE_SHEET_NAME || "Content Performance Breakdown",
       adBoostSheetName: process.env.AD_BOOST_SHEET_NAME || "Ad + Boost Tracking",
       metricSnapshotSheetName: process.env.METRIC_SNAPSHOT_SHEET_NAME || "Post Metric Snapshots",
+      importedContentSheetName: process.env.IMPORTED_CONTENT_SHEET_NAME || "Imported Content Metrics",
       applicationCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS || "",
       serviceAccountJson: parseServiceAccountJson(
         process.env.GOOGLE_SERVICE_ACCOUNT_JSON || decodeBase64Env("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
