@@ -110,9 +110,6 @@ async function importMetaExport(config = getConfig(), {
   sourceFileName,
   weekStart,
   weekEnd,
-  followerGrowth,
-  followersStart,
-  followersEnd,
   updateWeeklyRollups = true,
   updateAnalyticsTabs = true
 } = {}) {
@@ -128,7 +125,6 @@ async function importMetaExport(config = getConfig(), {
     weekEnd
   });
   const supplemental = await fetchImportSupplementalMetrics(config, importResult);
-  applyFollowerOverrides(supplemental.followers, { followerGrowth, followersStart, followersEnd });
   applyImportAdSupplement(importResult, supplemental.adSync.spendByPostId, config.meta.pageId);
   const sheetImport = await sheets.upsertImportedContentMetrics(importResult);
   const weeklySummary = await sheets.upsertWeeklyMetricsSummary(importResult, supplemental);
@@ -152,19 +148,6 @@ async function importMetaExport(config = getConfig(), {
     analyticsTabs,
     importedAt: new Date().toISOString()
   };
-}
-
-function applyFollowerOverrides(followers, overrides = {}) {
-  const manualGrowth = numberOrBlank(overrides.followerGrowth);
-  const manualStart = numberOrBlank(overrides.followersStart);
-  const manualEnd = numberOrBlank(overrides.followersEnd);
-  const hasManualValue = manualGrowth !== "" || manualStart !== "" || manualEnd !== "";
-  if (!hasManualValue) return;
-
-  if (manualGrowth !== "") followers.followerGrowth = manualGrowth;
-  if (manualStart !== "") followers.followersStart = manualStart;
-  if (manualEnd !== "") followers.followersEnd = manualEnd;
-  followers.source = "Manual upload field";
 }
 
 async function fetchImportSupplementalMetrics(config, importResult) {
@@ -276,12 +259,6 @@ function withoutSpendMap(value) {
 function toNumber(value) {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function numberOrBlank(value) {
-  if (value === undefined || value === null || value === "") return "";
-  const parsed = Number(String(value).replace(/[$,%\s,]/g, ""));
-  return Number.isFinite(parsed) ? parsed : "";
 }
 
 module.exports = {

@@ -25,9 +25,6 @@ async function main() {
     filePath,
     weekStart: args.weekStart,
     weekEnd: args.weekEnd,
-    followerGrowth: args.followerGrowth,
-    followersStart: args.followersStart,
-    followersEnd: args.followersEnd,
     updateWeeklyRollups: args.updateWeeklyRollups !== "false",
     updateAnalyticsTabs: args.updateAnalyticsTabs !== "false"
   });

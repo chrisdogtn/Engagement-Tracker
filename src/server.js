@@ -117,9 +117,6 @@ function createApp(config = getConfig({ requireSecrets: false })) {
         sourceFileName: req.file.originalname,
         weekStart: req.body.weekStart,
         weekEnd: req.body.weekEnd,
-        followerGrowth: req.body.followerGrowth,
-        followersStart: req.body.followersStart,
-        followersEnd: req.body.followersEnd,
         updateWeeklyRollups: booleanOption(req.body.updateWeeklyRollups) !== false,
         updateAnalyticsTabs: booleanOption(req.body.updateAnalyticsTabs) !== false
       });
@@ -244,19 +241,6 @@ function buildImportFormHtml(config = {}) {
     ${secretField}
     <label>Meta Lifetime CSV</label>
     <input name="metaExport" type="file" accept=".csv,text/csv" required>
-    <label>Week Start</label>
-    <input name="weekStart" placeholder="Optional, e.g. 5/4/2026">
-    <p class="hint">Usually inferred from the exported file name.</p>
-    <label>Week End</label>
-    <input name="weekEnd" placeholder="Optional, e.g. 5/10/2026">
-    <p class="hint">Usually inferred from the exported file name.</p>
-    <label>Follower Growth / Weekly Actual</label>
-    <input name="followerGrowth" placeholder="Optional, e.g. 8">
-    <p class="hint">Use this when Meta Business Suite shows a weekly followers number that is not included in the CSV export.</p>
-    <label>Followers Start</label>
-    <input name="followersStart" placeholder="Optional">
-    <label>Followers End</label>
-    <input name="followersEnd" placeholder="Optional">
     <div class="checks">
       <input type="hidden" name="updateWeeklyRollups" value="false">
       <label><input type="checkbox" name="updateWeeklyRollups" value="true" checked> Refresh Q-sheet weekly rollups</label>

@@ -7,7 +7,7 @@ A modular Node.js reporting bridge that imports weekly Meta Business Suite CSV e
 - Runs an Express server with a browser upload page at `GET /import-meta-export`.
 - Imports weekly Meta Business Suite **Lifetime** content exports into `Imported Content Metrics`.
 - Writes one row per imported week into `Weekly Metrics Summary`.
-- Uses optional API supplements only for data the CSV cannot provide, such as ad spend/leads mapping or follower count snapshots.
+- Uses optional API supplements only for data the CSV cannot provide, such as weekly follower activity and ad spend/leads mapping.
 - Uses app-level content rules from `config/content-rules.default.json` or `CONTENT_RULES_FILE`.
 - Applies filters to source/reporting tabs so you can filter by week, content type, boosted status, and metrics directly.
 - Updates weekly rollup tabs such as `Q2 Socials`, `Q3 Socials`, and `Q4 Socials`.
@@ -84,12 +84,6 @@ Import a Meta Business Suite Lifetime content export:
 
 ```bash
 node src/cli/import-meta-export.js --file="C:\Users\Chris\Downloads\May-04-2026_May-10-2026_1299243185022610.csv"
-```
-
-If Meta Business Suite gives you a weekly follower number, include it during import:
-
-```bash
-node src/cli/import-meta-export.js --file="C:\path\to\export.csv" --followerGrowth=8
 ```
 
 Legacy API sync webhook test:
@@ -302,8 +296,7 @@ Every Monday:
 2. Choose **Lifetime** export, not Daily.
 3. Turn on the columns for Views, Reach, Reactions, Comments, Shares, Total Clicks, organic/boosted breakdowns, and video metrics.
 4. Upload the CSV at `/import-meta-export`, or run the CLI import command.
-5. If Business Suite shows a weekly follower number, enter it in the upload form's `Follower Growth / Weekly Actual` field.
-6. Confirm `Imported Content Metrics` has one row per post for that week and `Weekly Metrics Summary` has one row for that week.
+5. Confirm `Imported Content Metrics` has one row per post for that week and `Weekly Metrics Summary` has one row for that week.
 
 The imported weekly rows become the locked reporting source for that week. Re-importing the same week updates the existing rows instead of creating duplicates.
 
@@ -474,7 +467,7 @@ Set the year used for `M/D` dashboard dates:
 DASHBOARD_YEAR=2026
 ```
 
-The Facebook Page API can provide a `page_follows` count snapshot, but in testing it behaved like a running count rather than the same weekly follower activity number shown in Business Suite. For that reason, the app does not auto-fill `Follower Growth` from `page_follows`; use the upload form's `Follower Growth / Weekly Actual` field when you want the Q-sheet follower section filled.
+The manual CSV export does not include follower activity. During each import, the app calls Page Insights for the same weekly date range using `page_daily_follows_unique`, `page_daily_unfollows_unique`, and `page_follows`. `Follower Growth` is filled from the summed daily unique follows; `Followers Start` and `Followers End` are calculated from the follower count snapshot and unfollows when available.
 
 ## Useful Commands
 

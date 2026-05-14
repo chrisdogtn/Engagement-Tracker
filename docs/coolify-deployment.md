@@ -201,7 +201,7 @@ https://your-public-url/import-meta-export
 
 Upload the Meta Business Suite **Lifetime** content export CSV. The app writes post rows to `Imported Content Metrics`, writes one weekly row to `Weekly Metrics Summary`, then refreshes the Q-sheet rollups and analytics tabs. Imported weekly rows are preferred over legacy API/snapshot fallback data for matching week-ending dates.
 
-If Meta Business Suite gives you a weekly follower number, enter it in the upload form's `Follower Growth / Weekly Actual` field. The CSV does not include that number.
+The CSV does not include follower activity, so the app supplements the import with Page Insights for the same weekly date range when `META_PAGE_ID` and `META_PAGE_ACCESS_TOKEN` are configured.
 
 The import page is public by default. Set `IMPORT_META_EXPORT_REQUIRE_SECRET=true` if you want it to require `WEBHOOK_SECRET`.
 

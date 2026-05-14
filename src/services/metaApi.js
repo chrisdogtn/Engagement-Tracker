@@ -84,21 +84,25 @@ class MetaApiClient {
     const summary = await this.fetchPageSummary().catch((error) => ({
       error: error.message
     }));
-    const insight = await this.fetchFollowerSnapshotInsight({ startDate, endDate }).catch((error) => ({
+    const insight = await this.fetchFollowerActivityInsights({ startDate, endDate }).catch((error) => ({
       error: error.message
     }));
+    const followerGrowth = firstNumber(insight.newFollows);
+    const unfollows = firstNumber(insight.unfollows);
     const followersEnd = firstNumber(insight.followersEnd, summary.followers_count, summary.fan_count);
-    const followersStart = firstNumber(insight.followersStart);
+    const followersStart = followersEnd !== "" && followerGrowth !== "" && unfollows !== ""
+      ? followersEnd - followerGrowth + unfollows
+      : "";
 
     return {
       configured: Boolean(this.pageId && this.pageAccessToken),
       metric: insight.metric || "",
-      followerGrowth: "",
+      followerGrowth,
       followersStart,
       followersEnd,
       pageName: summary.name || "",
       source: insight.metric
-        ? `Meta Page Insights: ${insight.metric} count snapshot; weekly follower growth not filled`
+        ? `Meta Page Insights: ${insight.metric}`
         : summary.error || insight.error || "Meta follower metric unavailable",
       error: insight.error || summary.error || ""
     };
@@ -123,25 +127,31 @@ class MetaApiClient {
     throw lastError;
   }
 
-  async fetchFollowerSnapshotInsight({ startDate, endDate }) {
-    const metric = "page_follows";
+  async fetchFollowerActivityInsights({ startDate, endDate }) {
+    const metrics = [
+      "page_daily_follows_unique",
+      "page_daily_unfollows_unique",
+      "page_follows"
+    ];
     const url = this.buildUrl(`/${this.pageId}/insights`, {
-      metric,
+      metric: metrics.join(","),
       period: "day",
       since: formatDate(startDate),
       until: formatDate(endDate)
     });
     const response = await this.getJson(url);
-    const item = response.data && response.data[0] ? response.data[0] : null;
-    const values = item && Array.isArray(item.values) ? item.values : [];
-    if (!values.length) {
-      return { metric, followersStart: "", followersEnd: "" };
-    }
-
+    const insightMap = buildInsightValuesMap(response.data || []);
+    const follows = dailyValueTotal(insightMap.page_daily_follows_unique);
+    const unfollows = dailyValueTotal(insightMap.page_daily_unfollows_unique);
+    const followerSnapshots = Array.isArray(insightMap.page_follows) ? insightMap.page_follows : [];
+    const followersEnd = followerSnapshots.length
+      ? numericInsightValue(followerSnapshots[followerSnapshots.length - 1].value)
+      : "";
     return {
-      metric,
-      followersStart: numericInsightValue(values[0].value),
-      followersEnd: numericInsightValue(values[values.length - 1].value)
+      metric: "page_daily_follows_unique",
+      newFollows: follows,
+      unfollows,
+      followersEnd
     };
   }
 
@@ -211,14 +221,33 @@ function buildInsightMap(insights) {
   return map;
 }
 
+function buildInsightValuesMap(insights) {
+  const map = {};
+
+  for (const item of insights || []) {
+    map[item.name] = item.values || [];
+  }
+
+  return map;
+}
+
 function nestedSummaryCount(edge) {
   if (!edge || !edge.summary) return 0;
   return Number(edge.summary.total_count || 0);
 }
 
 function numericInsightValue(value) {
+  if (Array.isArray(value)) {
+    return value.length ? numericInsightValue(value[0].value) : 0;
+  }
+
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function dailyValueTotal(values) {
+  if (!Array.isArray(values)) return 0;
+  return values.reduce((total, item) => total + numericInsightValue(item.value), 0);
 }
 
 function firstNumber(...values) {
