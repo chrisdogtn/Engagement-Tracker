@@ -231,7 +231,6 @@ Important: this is not a true refresh-token system. Meta does not issue a standa
 ```bash
 GOOGLE_APPLICATION_CREDENTIALS=./service-account.json
 GOOGLE_SPREADSHEET_ID=your-google-sheet-id
-GOOGLE_SHEET_TAB_NAME=Post-Level Tracking
 ```
 
 9. Open your Google Sheet and share it with the service account email, usually:

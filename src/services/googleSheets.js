@@ -272,6 +272,24 @@ class GoogleSheetsClient {
     return rows.map((row) => rowToObject(headers, row));
   }
 
+  async readPostLevelObjectsIfExists() {
+    const sheet = await this.findSheetByTitle(this.sheetTabName);
+    if (!sheet) return [];
+
+    const headerRange = `${quoteSheetName(this.sheetTabName)}!A1:Z1`;
+    const headerResponse = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: headerRange
+    });
+    const headers = headerResponse.data.values && headerResponse.data.values[0]
+      ? headerResponse.data.values[0]
+      : [];
+    if (!headers.length) return [];
+
+    const rows = await this.readPostLevelRows(headers);
+    return rows.map((row) => rowToObject(headers, row));
+  }
+
   async recordPostMetricSnapshot(posts = null) {
     await this.ensureMetricSnapshotSheet();
     const snapshotPosts = posts || await this.readPostLevelObjects();
@@ -325,6 +343,19 @@ class GoogleSheetsClient {
 
   async readMetricSnapshots() {
     await this.ensureMetricSnapshotSheet();
+    const range = `${quoteSheetName(this.metricSnapshotSheetName)}!A2:${columnToLetter(METRIC_SNAPSHOT_HEADER_ROW.length)}`;
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range
+    });
+    const rows = response.data.values || [];
+    return rows.map((row) => rowToObject(METRIC_SNAPSHOT_HEADER_ROW, row));
+  }
+
+  async readMetricSnapshotsIfExists() {
+    const sheet = await this.findSheetByTitle(this.metricSnapshotSheetName);
+    if (!sheet) return [];
+
     const range = `${quoteSheetName(this.metricSnapshotSheetName)}!A2:${columnToLetter(METRIC_SNAPSHOT_HEADER_ROW.length)}`;
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
@@ -529,11 +560,14 @@ class GoogleSheetsClient {
   }
 
   async updateWeeklyRollupSheets() {
-    const posts = await this.readPostLevelObjects();
     const importedMetrics = await this.readImportedContentObjects();
     const weeklySummaries = await this.readWeeklySummaryObjects();
-    const snapshots = this.weeklyRollupSource === "snapshots"
-      ? await this.readMetricSnapshots()
+    const useLegacyFallback = !importedMetrics.length && !weeklySummaries.length;
+    const posts = useLegacyFallback
+      ? await this.readPostLevelObjectsIfExists()
+      : [];
+    const snapshots = useLegacyFallback && this.weeklyRollupSource === "snapshots"
+      ? await this.readMetricSnapshotsIfExists()
       : [];
     const sheetNames = await this.resolveWeeklyRollupSheetNames();
     const results = [];
@@ -969,6 +1003,12 @@ class GoogleSheetsClient {
       throw new Error(`Could not find sheet tab "${title}".`);
     }
     return sheet.properties;
+  }
+
+  async findSheetByTitle(title) {
+    const spreadsheet = await this.getSpreadsheet();
+    const sheet = spreadsheet.sheets.find((item) => item.properties.title === title);
+    return sheet ? sheet.properties : null;
   }
 
   async getSpreadsheet() {

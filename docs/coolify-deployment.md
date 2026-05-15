@@ -106,14 +106,11 @@ META_AD_ACCOUNT_ID=act_your-ad-account-id
 META_AD_ACCESS_TOKEN=token-with-ads-read
 
 GOOGLE_SPREADSHEET_ID=your-google-sheet-id
-GOOGLE_SHEET_TAB_NAME=Post-Level Tracking
 
 CONTENT_RULES_FILE=./config/content-rules.default.json
 UPDATE_WEEKLY_ROLLUPS=true
 WEEKLY_ROLLUP_SHEET_PATTERN=^Q[1-4] Socials$
 WEEKLY_ROLLUP_BOUNDARY_MODE=exclude-boundaries
-WEEKLY_ROLLUP_SOURCE=snapshots
-METRIC_SNAPSHOT_SHEET_NAME=Post Metric Snapshots
 IMPORTED_CONTENT_SHEET_NAME=Imported Content Metrics
 WEEKLY_SUMMARY_SHEET_NAME=Weekly Metrics Summary
 DASHBOARD_YEAR=2026
